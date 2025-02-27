@@ -38,18 +38,24 @@ pub struct TestRuntime {
 
 impl Deref for TestRuntime {
     type Target = RgbDirRuntime;
-    fn deref(&self) -> &Self::Target { &self.rt }
+    fn deref(&self) -> &Self::Target {
+        &self.rt
+    }
 }
 impl DerefMut for TestRuntime {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.rt }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rt
+    }
 }
 
 impl TestRuntime {
-    pub fn new(descriptor_type: &DescriptorType) -> Self { Self::with(descriptor_type, INSTANCE_1) }
+    pub fn new(descriptor_type: &DescriptorType) -> Self {
+        Self::with(descriptor_type, INSTANCE_1)
+    }
 
     pub fn with(descriptor_type: &DescriptorType, instance: u8) -> Self {
         let mut seed = vec![0u8; 128];
-        rand::rng().fill_bytes(&mut seed);
+        rand::thread_rng().fill_bytes(&mut seed);
 
         let xpriv_account = XprivAccount::with_seed(true, &seed).derive(h![86, 1, 0]);
 
@@ -89,7 +95,11 @@ impl TestRuntime {
         let wallet = RgbWallet::create(provider, descr, Network::Regtest, true).unwrap();
         let rt = RgbDirRuntime::from(DirBarrow::with(wallet, mound));
 
-        let mut me = Self { rt, signer, instance };
+        let mut me = Self {
+            rt,
+            signer,
+            instance,
+        };
         me.sync();
         me
     }
@@ -116,10 +126,18 @@ impl TestRuntime {
                 }
             }
         }
-        Outpoint { txid, vout: Vout::from_u32(vout.unwrap()) }
+        Outpoint {
+            txid,
+            vout: Vout::from_u32(vout.unwrap()),
+        }
     }
 
-    pub fn issue_nia(&mut self, name: &str, issued_supply: u64, outpoint: Outpoint) -> ContractId {
+    pub fn issue_nia(
+        &mut self,
+        name: &'static str,
+        issued_supply: u64,
+        outpoint: Outpoint,
+    ) -> ContractId {
         let params = CreateParams {
             codex_id: CodexId::from_str(
                 "qaeakTdk-FccgZC9-4yYpoHa-quPSbQL-XmyBxtn-2CpD~38#jackson-couple-oberon",
@@ -128,36 +146,56 @@ impl TestRuntime {
             consensus: Consensus::Bitcoin,
             testnet: true,
             method: vname!("issue"),
-            name: tn!("NIA"),
+            name: tn!(name),
             timestamp: None,
             global: vec![
                 // TODO: simplify API for named state creation
                 NamedState {
                     name: vname!("name"),
-                    state: StateAtom { verified: svstr!(name), unverified: None },
+                    state: StateAtom {
+                        verified: svstr!(name),
+                        unverified: None,
+                    },
                 },
                 NamedState {
                     name: vname!("ticker"),
-                    state: StateAtom { verified: svstr!("NIA"), unverified: None },
+                    state: StateAtom {
+                        verified: svstr!("NIA"),
+                        unverified: None,
+                    },
                 },
                 NamedState {
                     name: vname!("precision"),
-                    state: StateAtom { verified: svenum!(centiMilli), unverified: None },
+                    state: StateAtom {
+                        verified: svenum!(centiMilli),
+                        unverified: None,
+                    },
                 },
                 NamedState {
                     name: vname!("circulating"),
-                    state: StateAtom { verified: svnum!(issued_supply), unverified: None },
+                    state: StateAtom {
+                        verified: svnum!(issued_supply),
+                        unverified: None,
+                    },
                 },
             ],
             owned: vec![NamedState {
                 name: vname!("owned"),
-                state: Assignment { seal: EitherSeal::Alt(outpoint), data: svnum!(issued_supply) },
+                state: Assignment {
+                    seal: EitherSeal::Alt(outpoint),
+                    data: svnum!(issued_supply),
+                },
             }],
         };
         self.rt.issue_to_file(params).unwrap()
     }
 
-    pub fn issue_cfa(&mut self, name: &str, issued_supply: u64, outpoint: Outpoint) -> ContractId {
+    pub fn issue_cfa(
+        &mut self,
+        name: &'static str,
+        issued_supply: u64,
+        outpoint: Outpoint,
+    ) -> ContractId {
         let params = CreateParams {
             codex_id: CodexId::from_str(
                 "6bl9LdZ_-BU8Skh9-f~4UazR-TFwyotq-ac4yebi-zodXJnw#weather-motif-patriot",
@@ -166,13 +204,16 @@ impl TestRuntime {
             consensus: Consensus::Bitcoin,
             testnet: true,
             method: vname!("issue"),
-            name: tn!("CFA"),
+            name: tn!(name),
             timestamp: None,
             global: vec![
                 // TODO: simplify API for named state creation
                 NamedState {
                     name: vname!("name"),
-                    state: StateAtom { verified: svstr!(name), unverified: None },
+                    state: StateAtom {
+                        verified: svstr!(name),
+                        unverified: None,
+                    },
                 },
                 NamedState {
                     name: vname!("details"),
@@ -183,16 +224,25 @@ impl TestRuntime {
                 },
                 NamedState {
                     name: vname!("precision"),
-                    state: StateAtom { verified: svenum!(centiMilli), unverified: None },
+                    state: StateAtom {
+                        verified: svenum!(centiMilli),
+                        unverified: None,
+                    },
                 },
                 NamedState {
                     name: vname!("circulating"),
-                    state: StateAtom { verified: svnum!(issued_supply), unverified: None },
+                    state: StateAtom {
+                        verified: svnum!(issued_supply),
+                        unverified: None,
+                    },
                 },
             ],
             owned: vec![NamedState {
                 name: vname!("owned"),
-                state: Assignment { seal: EitherSeal::Alt(outpoint), data: svnum!(issued_supply) },
+                state: Assignment {
+                    seal: EitherSeal::Alt(outpoint),
+                    data: svnum!(issued_supply),
+                },
             }],
         };
         self.rt.issue_to_file(params).unwrap()
@@ -208,6 +258,7 @@ impl TestRuntime {
             let wout = self.rt.wout(None);
             RgbBeneficiary::WitnessOut(wout)
         } else {
+            self.sync();
             let auth = self.rt.auth_token(None).unwrap();
             RgbBeneficiary::Token(auth)
         };
@@ -275,7 +326,10 @@ impl TestRuntime {
 
         let tx = self.sign_finalize_extract(&mut psbt);
 
-        println!("transfer txid: {}, consignment: {consignment_no}", tx.txid());
+        println!(
+            "transfer txid: {}, consignment: {consignment_no}",
+            tx.txid()
+        );
 
         if broadcast {
             self.broadcast_tx(&tx);
@@ -334,11 +388,17 @@ impl TestRuntime {
         self.wallet.update(&indexer).into_result().unwrap();
     }
 
-    pub fn network(&self) -> Network { self.wallet.network() }
+    pub fn network(&self) -> Network {
+        self.wallet.network()
+    }
 
-    fn get_indexer(&self) -> AnyIndexer { get_indexer(&self.indexer_url()) }
+    fn get_indexer(&self) -> AnyIndexer {
+        get_indexer(&self.indexer_url())
+    }
 
-    pub fn indexer_url(&self) -> String { indexer_url(self.instance, self.network()) }
+    pub fn indexer_url(&self) -> String {
+        indexer_url(self.instance, self.network())
+    }
 
     pub fn sign_finalize(&self, psbt: &mut Psbt) {
         let _sig_count = psbt.sign(&self.signer).unwrap();
@@ -364,5 +424,7 @@ impl TestRuntime {
         }
     }
 
-    pub fn broadcast_tx(&self, tx: &Tx) { broadcast_tx(tx, &self.indexer_url()); }
+    pub fn broadcast_tx(&self, tx: &Tx) {
+        broadcast_tx(tx, &self.indexer_url());
+    }
 }

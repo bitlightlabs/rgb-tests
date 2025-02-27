@@ -273,7 +273,7 @@ pub fn is_tx_mined(txid: Txid, indexer: &AnyIndexer) -> bool {
                 .map(|confs| confs > 0)
                 .unwrap_or_default()
         }
-        AnyIndexer::Esplora(indexer) | AnyIndexer::Mempool(indexer) => {
+        AnyIndexer::Esplora(indexer) /*| AnyIndexer::Mempool(indexer) */ => {
             let Ok(status) = indexer.tx_status(&txid) else {
                 return false;
             };

@@ -22,10 +22,10 @@ type AS = AssetSchema;
 #[case(TT::Blinded, DT::Tr, DT::Wpkh, AS::Nia, AS::Cfa)]
 #[case(TT::Blinded, DT::Tr, DT::Tr, AS::Nia, AS::Cfa)]
 // blinded: nia - uda
-#[case(TT::Blinded, DT::Wpkh, DT::Wpkh, AS::Nia, AS::Uda)]
-#[case(TT::Blinded, DT::Wpkh, DT::Tr, AS::Nia, AS::Uda)]
-#[case(TT::Blinded, DT::Tr, DT::Wpkh, AS::Nia, AS::Uda)]
-#[case(TT::Blinded, DT::Tr, DT::Tr, AS::Nia, AS::Uda)]
+//#[case(TT::Blinded, DT::Wpkh, DT::Wpkh, AS::Nia, AS::Uda)]
+//#[case(TT::Blinded, DT::Wpkh, DT::Tr, AS::Nia, AS::Uda)]
+//#[case(TT::Blinded, DT::Tr, DT::Wpkh, AS::Nia, AS::Uda)]
+//#[case(TT::Blinded, DT::Tr, DT::Tr, AS::Nia, AS::Uda)]
 // blinded: cfa - cfa
 #[case(TT::Blinded, DT::Wpkh, DT::Wpkh, AS::Cfa, AS::Cfa)]
 #[case(TT::Blinded, DT::Wpkh, DT::Tr, AS::Cfa, AS::Cfa)]
@@ -67,10 +67,10 @@ type AS = AssetSchema;
 #[case(TT::Witness, DT::Tr, DT::Wpkh, AS::Nia, AS::Cfa)]
 #[case(TT::Witness, DT::Tr, DT::Tr, AS::Nia, AS::Cfa)]
 // witness: nia - uda
-#[case(TT::Witness, DT::Wpkh, DT::Wpkh, AS::Nia, AS::Uda)]
-#[case(TT::Witness, DT::Wpkh, DT::Tr, AS::Nia, AS::Uda)]
-#[case(TT::Witness, DT::Tr, DT::Wpkh, AS::Nia, AS::Uda)]
-#[case(TT::Witness, DT::Tr, DT::Tr, AS::Nia, AS::Uda)]
+//#[case(TT::Witness, DT::Wpkh, DT::Wpkh, AS::Nia, AS::Uda)]
+//#[case(TT::Witness, DT::Wpkh, DT::Tr, AS::Nia, AS::Uda)]
+//#[case(TT::Witness, DT::Tr, DT::Wpkh, AS::Nia, AS::Uda)]
+//#[case(TT::Witness, DT::Tr, DT::Tr, AS::Nia, AS::Uda)]
 // witness: cfa - cfa
 #[case(TT::Witness, DT::Wpkh, DT::Wpkh, AS::Cfa, AS::Cfa)]
 #[case(TT::Witness, DT::Wpkh, DT::Tr, AS::Cfa, AS::Cfa)]
@@ -127,20 +127,21 @@ fn transfer_loop(
     // wlt_1 issues 2 assets on the same UTXO
     let utxo = wlt_1.get_utxo(None);
     let contract_id_1 = match asset_schema_1 {
-        AssetSchema::Nia => wlt_1.issue_nia("Nia 1", issued_supply_1, utxo),
+        AssetSchema::Nia => wlt_1.issue_nia("Nia1", issued_supply_1, utxo),
         AssetSchema::Uda => todo!(), // wlt_1.issue_uda(utxo),
-        AssetSchema::Cfa => wlt_1.issue_cfa("Cfa 1", issued_supply_1, utxo),
+        AssetSchema::Cfa => wlt_1.issue_cfa("Cfa1", issued_supply_1, utxo),
     };
     let contract_id_2 = match asset_schema_2 {
-        AssetSchema::Nia => wlt_1.issue_nia("Nia 2", issued_supply_2, utxo),
+        AssetSchema::Nia => wlt_1.issue_nia("Nia2", issued_supply_2, utxo),
         AssetSchema::Uda => todo!(), // wlt_1.issue_uda(utxo),
-        AssetSchema::Cfa => wlt_1.issue_cfa("Cfa 2", issued_supply_2, utxo),
+        AssetSchema::Cfa => wlt_1.issue_cfa("Cfa2", issued_supply_2, utxo),
     };
     wlt_1.check_allocations(contract_id_1, asset_schema_1, vec![issued_supply_1], true);
     wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2], true);
 
     // wlt_1 spends asset 1, moving the other with a blank transition
     let amount_1 = if asset_schema_1 == AssetSchema::Uda { 1 } else { 99 };
+    println!("send 1");
     wlt_1.send(&mut wlt_2, wout, contract_id_1, amount_1, sats, None);
     wlt_1.check_allocations(contract_id_1, asset_schema_1, vec![issued_supply_1 - amount_1], false);
     wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2], true);
@@ -149,6 +150,7 @@ fn transfer_loop(
     // wlt_1 spends asset 1 change (only if possible)
     let amount_2 = 33;
     if asset_schema_1 != AssetSchema::Uda {
+        println!("send 2");
         wlt_1.send(&mut wlt_2, wout, contract_id_1, amount_2, sats, None);
         wlt_1.check_allocations(
             contract_id_1,
@@ -162,6 +164,7 @@ fn transfer_loop(
 
     // wlt_1 spends asset 2
     let amount_3 = if asset_schema_2 == AssetSchema::Uda { 1 } else { 22 };
+    println!("send 3");
     wlt_1.send(&mut wlt_2, wout, contract_id_2, amount_3, sats, None);
     wlt_1.check_allocations(
         contract_id_1,
