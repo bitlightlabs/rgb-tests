@@ -248,6 +248,13 @@ impl TestRuntime {
         self.rt.issue_to_file(params).unwrap()
     }
 
+    pub fn build_path(&self, contract_name: &str) -> PathBuf {
+        self.rt
+            .mound
+            .path()
+            .join(contract_name.to_string() + ".contract")
+    }
+
     pub fn invoice(
         &mut self,
         contract_id: ContractId,
@@ -259,7 +266,10 @@ impl TestRuntime {
             RgbBeneficiary::WitnessOut(wout)
         } else {
             self.sync();
-            let auth = self.rt.auth_token(None).unwrap();
+            let auth = self
+                .rt
+                .auth_token(None)
+                .expect("no auth token, you need to generate some utxos");
             RgbBeneficiary::Token(auth)
         };
         let value = StrictVal::num(amount);
@@ -275,7 +285,8 @@ impl TestRuntime {
         sats: u64,
         report: Option<&Report>,
     ) -> (PathBuf, Tx) {
-        let invoice = recv_wlt.invoice(contract_id, amount, wout);
+        let invoice: rgb::CallRequest<ContractId, RgbBeneficiary> =
+            recv_wlt.invoice(contract_id, amount, wout);
         self.send_to_invoice(recv_wlt, invoice, Some(sats), None, report)
     }
 
