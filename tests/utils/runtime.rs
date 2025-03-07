@@ -1,9 +1,11 @@
+use std::fs::{self, OpenOptions};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use std::{io, thread};
 
 use bpstd::psbt::{PsbtConstructor, TxParams};
 use bpstd::signers::TestnetSigner;
@@ -29,11 +31,35 @@ use crate::utils::chain::{
 };
 use crate::utils::report::Report;
 use crate::utils::{AssetSchema, DescriptorType, DEFAULT_FEE_ABS};
+struct LockGuard {
+    path: PathBuf,
+}
+
+impl LockGuard {
+    fn new() -> io::Result<Self> {
+        let path = PathBuf::from("./tmp/test.lock");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        Ok(LockGuard { path })
+    }
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
 
 pub struct TestRuntime {
-    rt: RgbDirRuntime,
+    pub rt: RgbDirRuntime,
     signer: TestnetSigner,
     instance: u8,
+    alias: String,
 }
 
 impl Deref for TestRuntime {
@@ -49,20 +75,23 @@ impl DerefMut for TestRuntime {
 }
 
 impl TestRuntime {
-    pub fn new(descriptor_type: &DescriptorType) -> Self {
-        Self::with(descriptor_type, INSTANCE_1)
+    pub fn new(descriptor_type: &DescriptorType, alias: &str) -> Self {
+        Self::with(descriptor_type, INSTANCE_1, alias)
     }
 
-    pub fn with(descriptor_type: &DescriptorType, instance: u8) -> Self {
+    pub fn with(descriptor_type: &DescriptorType, instance: u8, alias: &str) -> Self {
         let mut seed = vec![0u8; 128];
         rand::thread_rng().fill_bytes(&mut seed);
 
         let xpriv_account = XprivAccount::with_seed(true, &seed).derive(h![86, 1, 0]);
 
         let fingerprint = xpriv_account.account_fp().to_string();
-        let wallet_dir = PathBuf::from("tests").join("test-data").join(fingerprint);
+        let wallet_dir = PathBuf::from("tests")
+            .join("test-data")
+            .join(fingerprint.to_string());
+        let alias = format!("{}-{}", alias, fingerprint);
 
-        Self::_init(descriptor_type, wallet_dir, xpriv_account, instance)
+        Self::_init(descriptor_type, wallet_dir, xpriv_account, instance, &alias)
     }
 
     fn _init(
@@ -70,6 +99,7 @@ impl TestRuntime {
         wallet_dir: PathBuf,
         account: XprivAccount,
         instance: u8,
+        alias: &str,
     ) -> Self {
         std::fs::create_dir_all(&wallet_dir).unwrap();
         println!("wallet dir: {wallet_dir:?}");
@@ -99,6 +129,7 @@ impl TestRuntime {
             rt,
             signer,
             instance,
+            alias: alias.to_string(),
         };
         me.sync();
         me
@@ -387,6 +418,10 @@ impl TestRuntime {
                     .collect::<Vec<_>>();
                 actual_fungible_allocations.sort();
                 expected_fungible_allocations.sort();
+                println!(
+                    "{}: actual fungible allocations: {:?}, expected fungible allocations: {:?}",
+                    self.alias, actual_fungible_allocations, expected_fungible_allocations
+                );
                 assert_eq!(actual_fungible_allocations, expected_fungible_allocations);
             }
             AssetSchema::Uda => {
@@ -395,6 +430,16 @@ impl TestRuntime {
         }
     }
     pub fn sync(&mut self) {
+        let _lock_guard = loop {
+            match LockGuard::new() {
+                Ok(guard) => break guard,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    thread::sleep(Duration::from_secs(1));
+                }
+                Err(e) => panic!("cannot get lock: {}", e),
+            }
+        };
+
         let indexer = self.get_indexer();
         self.wallet.update(&indexer).into_result().unwrap();
     }
