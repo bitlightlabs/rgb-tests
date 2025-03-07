@@ -124,7 +124,7 @@ fn transfer_loop(
     let wout = transfer_type == TT::Witness;
     let mut sats = 9000;
 
-    // wlt_1 issues 2 assets on the same UTXO
+    println!("-- DEBUG: wlt_1 issues 2 assets on the same UTXO");
     let utxo = wlt_1.get_utxo(None);
     let contract_id_1 = match asset_schema_1 {
         AssetSchema::Nia => wlt_1.issue_nia("Nia1", issued_supply_1, utxo),
@@ -139,15 +139,30 @@ fn transfer_loop(
     wlt_1.check_allocations(contract_id_1, asset_schema_1, vec![issued_supply_1], true);
     wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2], true);
 
-    // wlt_1 spends asset 1, moving the other with a blank transition
-    let amount_1 = if asset_schema_1 == AssetSchema::Uda { 1 } else { 99 };
+    println!("-- DEBUG: wlt_1 spends asset 1, moving the other with a blank transition");
+    let amount_1 = if asset_schema_1 == AssetSchema::Uda {
+        1
+    } else {
+        99
+    };
     println!("send 1");
+
+    wlt_2.mound.import_articles(&wlt_1.build_path("Nia1")).expect("wlt2 should import wlt1's Nia1");
+    wlt_2.mound.import_articles(&wlt_1.build_path("Nia2")).expect("wlt2 should import wlt1's Nia2");
+    wlt_2.get_utxo(None); // make sure wlt_2 has some coins so it can invoice
     wlt_1.send(&mut wlt_2, wout, contract_id_1, amount_1, sats, None);
-    wlt_1.check_allocations(contract_id_1, asset_schema_1, vec![issued_supply_1 - amount_1], false);
+    println!("-- DEBUG: wlt_1 checks allocations after spending asset 1");
+    wlt_1.check_allocations(
+        contract_id_1,
+        asset_schema_1,
+        vec![issued_supply_1 - amount_1],
+        false,
+    );
     wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2], true);
+    println!("-- DEBUG: wlt_2 checks allocations after receiving asset 1");
     wlt_2.check_allocations(contract_id_1, asset_schema_1, vec![amount_1], true);
 
-    // wlt_1 spends asset 1 change (only if possible)
+    println!("-- DEBUG: wlt_1 spends asset 1 change (only if possible)");
     let amount_2 = 33;
     if asset_schema_1 != AssetSchema::Uda {
         println!("send 2");
@@ -159,11 +174,20 @@ fn transfer_loop(
             false,
         );
         wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2], true);
-        wlt_2.check_allocations(contract_id_1, asset_schema_1, vec![amount_1, amount_2], true);
+        wlt_2.check_allocations(
+            contract_id_1,
+            asset_schema_1,
+            vec![amount_1, amount_2],
+            true,
+        );
     }
 
-    // wlt_1 spends asset 2
-    let amount_3 = if asset_schema_2 == AssetSchema::Uda { 1 } else { 22 };
+    println!("-- DEBUG: wlt_1 spends asset 2");
+    let amount_3 = if asset_schema_2 == AssetSchema::Uda {
+        1
+    } else {
+        22
+    };
     println!("send 3");
     wlt_1.send(&mut wlt_2, wout, contract_id_2, amount_3, sats, None);
     wlt_1.check_allocations(
@@ -172,12 +196,26 @@ fn transfer_loop(
         vec![issued_supply_1 - amount_1 - amount_2],
         false,
     );
-    wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2 - amount_3], false);
-    wlt_2.check_allocations(contract_id_1, asset_schema_1, vec![amount_1, amount_2], true);
+    wlt_1.check_allocations(
+        contract_id_2,
+        asset_schema_2,
+        vec![issued_supply_2 - amount_3],
+        false,
+    );
+    wlt_2.check_allocations(
+        contract_id_1,
+        asset_schema_1,
+        vec![amount_1, amount_2],
+        true,
+    );
     wlt_2.check_allocations(contract_id_2, asset_schema_2, vec![amount_3], true);
 
-    // wlt_2 spends received allocation(s) of asset 1
-    let amount_4 = if asset_schema_1 == AssetSchema::Uda { 1 } else { 111 };
+    println!("-- DEBUG: wlt_2 spends received allocation(s) of asset 1");
+    let amount_4 = if asset_schema_1 == AssetSchema::Uda {
+        1
+    } else {
+        111
+    };
     sats -= 1000;
     wlt_2.send(&mut wlt_1, wout, contract_id_1, amount_4, sats, None);
     wlt_1.check_allocations(
@@ -186,7 +224,12 @@ fn transfer_loop(
         vec![issued_supply_1 - amount_1 - amount_2, amount_4],
         true,
     );
-    wlt_1.check_allocations(contract_id_2, asset_schema_2, vec![issued_supply_2 - amount_3], false);
+    wlt_1.check_allocations(
+        contract_id_2,
+        asset_schema_2,
+        vec![issued_supply_2 - amount_3],
+        false,
+    );
     wlt_2.check_allocations(
         contract_id_1,
         asset_schema_1,
@@ -195,8 +238,12 @@ fn transfer_loop(
     );
     wlt_2.check_allocations(contract_id_2, asset_schema_2, vec![amount_3], true);
 
-    // wlt_2 spends asset 2
-    let amount_5 = if asset_schema_2 == AssetSchema::Uda { 1 } else { 11 };
+    println!("-- DEBUG: wlt_2 spends asset 2");
+    let amount_5 = if asset_schema_2 == AssetSchema::Uda {
+        1
+    } else {
+        11
+    };
     sats -= 1000;
     wlt_2.send(&mut wlt_1, wout, contract_id_2, amount_5, sats, None);
     wlt_1.check_allocations(
@@ -217,9 +264,14 @@ fn transfer_loop(
         vec![amount_1 + amount_2 - amount_4],
         false,
     );
-    wlt_2.check_allocations(contract_id_2, asset_schema_2, vec![amount_3 - amount_5], false);
+    wlt_2.check_allocations(
+        contract_id_2,
+        asset_schema_2,
+        vec![amount_3 - amount_5],
+        false,
+    );
 
-    // wlt_1 spends asset 1, received back
+    println!("-- DEBUG: wlt_1 spends asset 1, received back");
     let amount_6 = if asset_schema_1 == AssetSchema::Uda {
         1
     } else {
@@ -240,11 +292,19 @@ fn transfer_loop(
         vec![amount_1 + amount_2 - amount_4, amount_6],
         true,
     );
-    wlt_2.check_allocations(contract_id_2, asset_schema_2, vec![amount_3 - amount_5], false);
+    wlt_2.check_allocations(
+        contract_id_2,
+        asset_schema_2,
+        vec![amount_3 - amount_5],
+        false,
+    );
 
-    // wlt_1 spends asset 2, received back
-    let amount_7 =
-        if asset_schema_2 == AssetSchema::Uda { 1 } else { issued_supply_2 - amount_3 + amount_5 };
+    println!("-- DEBUG: wlt_1 spends asset 2, received back");
+    let amount_7 = if asset_schema_2 == AssetSchema::Uda {
+        1
+    } else {
+        issued_supply_2 - amount_3 + amount_5
+    };
     sats -= 1000;
     wlt_1.send(&mut wlt_2, wout, contract_id_2, amount_7, sats, None);
     wlt_1.check_allocations(contract_id_1, asset_schema_1, vec![], false);
