@@ -19,67 +19,92 @@ const MEDIA_FPATH: &str = "tests/fixtures/rgb_logo.jpeg";
 #[case(DescriptorType::Tr)]
 fn descriptor_and_close_method(#[case] wallet_desc: DescriptorType) {}
 
-// #[apply(descriptor_and_close_method)]
-// fn issue_nia(wallet_desc: DescriptorType) {
-//     use utils::runtime::TestRuntime;
+#[apply(descriptor_and_close_method)]
+fn issue_nia(#[case] wallet_desc: DescriptorType) {
+    use rgb::aora::Aora;
+    use utils::runtime::TestRuntime;
 
-//     println!("wallet_desc {wallet_desc:?}");
+    initialize();
 
-//     initialize();
+    let mut wallet = TestRuntime::new(&wallet_desc, "issuer");
 
-//     let mut wallet = TestRuntime::new(&wallet_desc, "wlt_issue");
+    let utxo = wallet.get_utxo(Some(10_000));
 
-//     // Create NIA issuance parameters
-//     let mut params = NIAIssueParams::new("TestAsset", "TEST", "centiMilli", 1_000_000);
+    let contract_id = wallet.issue_nia("DemoNIA", 10_000, utxo.clone());
 
-//     // Add initial allocations
-//     let fake_outpoint_zero =
-//         Outpoint::from_str("0000000000000000000000000000000000000000000000000000000000000000:0")
-//             .unwrap();
-//     let fake_outpoint_one =
-//         Outpoint::from_str("0000000000000000000000000000000000000000000000000000000000000001:0")
-//             .unwrap();
-//     params
-//         .add_allocation(fake_outpoint_zero, 500_000)
-//         .add_allocation(fake_outpoint_one, 500_000);
+    wallet.check_allocations(contract_id, AS::Nia, vec![10_000], false);
 
-//     // Issue the contract
-//     let contract_id = wallet.issue_nia_with_params(params);
+    let stockpile = wallet.mound.contract_mut(contract_id);
 
-//     // Verify contract state
-//     let state = wallet
-//         .contract_state(contract_id)
-//         .expect("Contract state does not exist");
+    let contract = &stockpile.stock().articles().contract;
+    assert_eq!(contract.meta.name.to_string(), "DemoNIA");
 
-//     // Verify immutable state
-//     assert_eq!(state.immutable.name, "TestAsset");
-//     assert_eq!(state.immutable.ticker, "TEST");
-//     assert_eq!(state.immutable.precision, "centiMilli");
+    let mut found_name = false;
+    let mut found_ticker = false;
+    let mut found_precision = false;
+    let mut found_circulating = false;
 
-//     // Verify circulating supply
-//     assert_eq!(state.immutable.circulating_supply, 1_000_000);
+    let imm_state = &stockpile.stock().state().main.immutable;
+    for (name, map) in imm_state {
+        for (addr, atom) in map {
+            match name.as_str() {
+                "name" => {
+                    assert_eq!(atom.verified.to_string(), "\"DemoNIA\"");
+                    found_name = true;
+                }
+                "ticker" => {
+                    assert_eq!(atom.verified.to_string(), "\"NIA\"");
+                    found_ticker = true;
+                }
+                "precision" => {
+                    assert_eq!(atom.verified.to_string(), "centiMilli");
+                    found_precision = true;
+                }
+                "circulating" => {
+                    let supply = atom.verified.unwrap_uint::<u64>();
+                    assert_eq!(supply, 10_000);
+                    found_circulating = true;
+                }
+                _ => (),
+            }
+        }
+    }
+    assert!(found_name, "Name field not found in global state");
+    assert!(found_ticker, "Ticker field not found in global state");
+    assert!(found_precision, "Precision field not found");
+    assert!(found_circulating, "Circulating supply field not found");
 
-//     // Verify ownership state
-//     dbg!(&state.owned.allocations);
-//     assert_eq!(state.owned.allocations.len(), 2);
-//     assert!(state
-//         .owned
-//         .allocations
-//         .iter()
-//         .any(|(outpoint, amount)| *outpoint == fake_outpoint_zero && *amount == 500_000));
-//     assert!(state
-//         .owned
-//         .allocations
-//         .iter()
-//         .any(|(outpoint, amount)| *outpoint == fake_outpoint_one && *amount == 500_000));
-// }
+    let owned_states = stockpile
+        .stock()
+        .state()
+        .main
+        .owned
+        .get("owned")
+        .expect("Owned state should exist")
+        .clone();
+
+    let mut found = false;
+    for (addr, assignment) in owned_states.iter() {
+        let keep = stockpile.pile_mut().keep_mut(); // mutable borrow
+        let seals = keep.read(addr.opid);
+        if let Some(seal) = seals.get(&addr.pos) {
+            let utxo_match = seal.primary == bpstd::seals::WOutpoint::Extern(utxo);
+            if utxo_match && assignment.unwrap_num().unwrap_uint::<u64>() == 10_000 {
+                found = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        found,
+        "The specified UTXO with allocation of 10,000 not found in owned states"
+    );
+}
 
 #[apply(descriptor_and_close_method)]
 fn issue_cfa(#[case] wallet_desc: DescriptorType) {
     use rgb::aora::Aora;
     use utils::runtime::TestRuntime;
-
-    println!("wallet_desc {wallet_desc:?}");
 
     initialize();
 
@@ -93,20 +118,8 @@ fn issue_cfa(#[case] wallet_desc: DescriptorType) {
 
     let stockpile = wallet.mound.contract_mut(contract_id);
 
-    // 验证全局状态元数据
     let contract = &stockpile.stock().articles().contract;
     assert_eq!(contract.meta.name.to_string(), "DemoCFA");
-
-    // 遍历全局状态验证具体字段
-    // let state = wallet.rt.state_all(Some(contract_id)).next().unwrap().1;
-    // let mut actual_fungible_allocations = state
-    //     .owned
-    //     // .get("global")
-    //     .get("immutable")
-    //     .unwrap()
-    //     .iter()
-    //     .map(|(_, assignment)| assignment.data.unwrap_num().unwrap_uint::<u64>())
-    //     .collect::<Vec<_>>();
 
     let mut found_name = false;
     let mut found_precision = false;
@@ -166,90 +179,115 @@ fn issue_cfa(#[case] wallet_desc: DescriptorType) {
     );
 }
 
-// #[apply(descriptor_and_close_method)]
-// fn issue_cfa_multiple_utxos(wallet_desc: DescriptorType) {
-//     println!("wallet_desc {wallet_desc:?}");
+#[apply(descriptor_and_close_method)]
+fn issue_cfa_multiple_utxos(#[case] wallet_desc: DescriptorType) {
+    use utils::runtime::TestRuntime;
 
-//     initialize();
+    initialize();
 
-//     let mut wallet = get_wallet(&wallet_desc);
+    let mut wallet = TestRuntime::new(&wallet_desc, "issuer");
 
-//     // Create CFA issuance parameters with multiple allocations
-//     let mut params = CFAIssueParams::new("Multi_UTXO_CFA", "centiMilli", 999);
+    // Generate 3 UTXOs
+    let utxo1 = wallet.get_utxo(Some(10_000));
+    let utxo2 = wallet.get_utxo(Some(10_000));
+    let utxo3 = wallet.get_utxo(Some(10_000));
 
-//     // Get multiple UTXOs and add allocations
-//     let amounts = vec![222, 444, 333];
-//     for amount in amounts.iter() {
-//         let outpoint = wallet.get_utxo(None);
-//         params.add_allocation(outpoint, *amount);
-//     }
+    // Define allocations
+    let allocations = vec![
+        (utxo1, 222),
+        (utxo2, 444),
+        (utxo3, 333),
+    ];
 
-//     // Issue the contract
-//     let contract_id = wallet.issue_cfa_with_params(params);
+    // Issue CFA with multiple allocations
+    let contract_id = wallet.issue_cfa_with_allocations("MultiCFA", allocations);
 
-//     // Verify contract state
-//     let state = wallet
-//         .contract_state(contract_id)
-//         .expect("Contract state does not exist");
+    // Verify total supply and allocations
+    wallet.check_allocations(contract_id, AS::Cfa, vec![222, 444, 333], true);
 
-//     // Verify immutable state
-//     assert_eq!(state.immutable.name, "Multi_UTXO_CFA");
-//     assert_eq!(state.immutable.precision, "centiMilli");
-//     assert_eq!(state.immutable.circulating_supply, 999);
+    let stockpile = wallet.mound.contract_mut(contract_id);
+    let imm_state = &stockpile.stock().state().main.immutable;
 
-//     // Verify ownership state
-//     assert_eq!(state.owned.allocations.len(), 3);
-//     let total_allocated: u64 = state
-//         .owned
-//         .allocations
-//         .iter()
-//         .map(|(_, amount)| amount)
-//         .sum();
-//     assert_eq!(total_allocated, 999);
-// }
+    // Check global circulating supply
+    let circulating = imm_state
+        .get("circulating")
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()
+        .verified
+        .unwrap_uint::<u64>();
+    assert_eq!(circulating, 999);
 
-// #[apply(descriptor_and_close_method)]
-// fn issue_nia_multiple_utxos(wallet_desc: DescriptorType) {
-//     println!("wallet_desc {wallet_desc:?}");
+    // Verify allocation amounts
+    let owned_states = stockpile
+        .stock()
+        .state()
+        .main
+        .owned
+        .get("owned")
+        .unwrap();
+    let amounts: Vec<u64> = owned_states.iter()
+        .map(|(_, assignment)| assignment.unwrap_num().unwrap_uint::<u64>())
+        .collect();
+    let mut sorted_amounts = amounts.clone();
+    sorted_amounts.sort();
+    assert_eq!(sorted_amounts, vec![222, 333, 444]);
+}
 
-//     initialize();
+#[apply(descriptor_and_close_method)]
+fn issue_nia_multiple_utxos(#[case] wallet_desc: DescriptorType) {
+    use utils::runtime::TestRuntime;
 
-//     let mut wallet = get_wallet(&wallet_desc);
+    initialize();
 
-//     // Create NIA issuance parameters with multiple allocations
-//     let mut params = NIAIssueParams::new("Multi_UTXO_NIA", "MUTX", "centiMilli", 999);
+    let mut wallet = TestRuntime::new(&wallet_desc, "issuer");
 
-//     // Get multiple UTXOs and add allocations
-//     let amounts = vec![333, 333, 333];
-//     for amount in amounts.iter() {
-//         let outpoint = wallet.get_utxo(None);
-//         params.add_allocation(outpoint, *amount);
-//     }
+    // Generate 3 UTXOs
+    let utxo1 = wallet.get_utxo(Some(10_000));
+    let utxo2 = wallet.get_utxo(Some(10_000));
+    let utxo3 = wallet.get_utxo(Some(10_000));
 
-//     // Issue the contract
-//     let contract_id = wallet.issue_nia_with_params(params);
+    // Define allocations
+    let allocations = vec![
+        (utxo1, 333),
+        (utxo2, 333),
+        (utxo3, 333),
+    ];
 
-//     // Verify contract state
-//     let state = wallet
-//         .contract_state(contract_id)
-//         .expect("Contract state does not exist");
+    // Issue NIA with multiple allocations
+    let contract_id = wallet.issue_nia_with_allocations("MultiNIA", allocations);
 
-//     // Verify immutable state
-//     assert_eq!(state.immutable.name, "Multi_UTXO_NIA");
-//     assert_eq!(state.immutable.ticker, "MUTX");
-//     assert_eq!(state.immutable.precision, "centiMilli");
-//     assert_eq!(state.immutable.circulating_supply, 999);
+    // Verify total supply and allocations
+    wallet.check_allocations(contract_id, AS::Nia, vec![333, 333, 333], false);
 
-//     // Verify ownership state
-//     assert_eq!(state.owned.allocations.len(), 3);
-//     let total_allocated: u64 = state
-//         .owned
-//         .allocations
-//         .iter()
-//         .map(|(_, amount)| amount)
-//         .sum();
-//     assert_eq!(total_allocated, 999);
-// }
+    let stockpile = wallet.mound.contract_mut(contract_id);
+    let imm_state = &stockpile.stock().state().main.immutable;
+
+    // Check global circulating supply
+    let circulating = imm_state
+        .get("circulating")
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()
+        .verified
+        .unwrap_uint::<u64>();
+    assert_eq!(circulating, 999);
+
+    // Verify allocation amounts
+    let owned_states = stockpile
+        .stock()
+        .state()
+        .main
+        .owned
+        .get("owned")
+        .unwrap();
+    let amounts: Vec<u64> = owned_states.iter()
+        .map(|(_, assignment)| assignment.unwrap_num().unwrap_uint::<u64>())
+        .collect();
+    assert_eq!(amounts, vec![333, 333, 333]);
+}
 
 // TODO: RGB official is improving the feature of uda asset, will add test after it's ready
 // #[apply(descriptor_and_close_method)]
