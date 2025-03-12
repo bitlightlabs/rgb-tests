@@ -279,6 +279,126 @@ impl TestRuntime {
         self.rt.issue_to_file(params).unwrap()
     }
 
+    pub fn issue_cfa_with_allocations(
+        &mut self,
+        name: &'static str,
+        allocations: Vec<(Outpoint, u64)>,
+    ) -> ContractId {
+        let total_supply: u64 = allocations.iter().map(|(_, amt)| amt).sum();
+        let params = CreateParams {
+            codex_id: CodexId::from_str(
+                "6bl9LdZ_-BU8Skh9-f~4UazR-TFwyotq-ac4yebi-zodXJnw#weather-motif-patriot",
+            )
+            .unwrap(),
+            consensus: Consensus::Bitcoin,
+            testnet: true,
+            method: vname!("issue"),
+            name: tn!(name),
+            timestamp: None,
+            global: vec![
+                NamedState {
+                    name: vname!("name"),
+                    state: StateAtom {
+                        verified: svstr!(name),
+                        unverified: None,
+                    },
+                },
+                NamedState {
+                    name: vname!("details"),
+                    state: StateAtom {
+                        verified: StrictVal::Unit,
+                        unverified: Some(svstr!("Demo CFA asset")),
+                    },
+                },
+                NamedState {
+                    name: vname!("precision"),
+                    state: StateAtom {
+                        verified: svenum!(centiMilli),
+                        unverified: None,
+                    },
+                },
+                NamedState {
+                    name: vname!("circulating"),
+                    state: StateAtom {
+                        verified: svnum!(total_supply),
+                        unverified: None,
+                    },
+                },
+            ],
+            owned: allocations
+                .into_iter()
+                .map(|(outpoint, amount)| NamedState {
+                    name: vname!("owned"),
+                    state: Assignment {
+                        seal: EitherSeal::Alt(outpoint),
+                        data: svnum!(amount),
+                    },
+                })
+                .collect(),
+        };
+        self.rt.issue_to_file(params).unwrap()
+    }
+
+    pub fn issue_nia_with_allocations(
+        &mut self,
+        name: &'static str,
+        allocations: Vec<(Outpoint, u64)>,
+    ) -> ContractId {
+        let total_supply: u64 = allocations.iter().map(|(_, amt)| amt).sum();
+        let params = CreateParams {
+            codex_id: CodexId::from_str(
+                "qaeakTdk-FccgZC9-4yYpoHa-quPSbQL-XmyBxtn-2CpD~38#jackson-couple-oberon",
+            )
+            .unwrap(),
+            consensus: Consensus::Bitcoin,
+            testnet: true,
+            method: vname!("issue"),
+            name: tn!(name),
+            timestamp: None,
+            global: vec![
+                NamedState {
+                    name: vname!("name"),
+                    state: StateAtom {
+                        verified: svstr!(name),
+                        unverified: None,
+                    },
+                },
+                NamedState {
+                    name: vname!("ticker"),
+                    state: StateAtom {
+                        verified: svstr!("NIA"),
+                        unverified: None,
+                    },
+                },
+                NamedState {
+                    name: vname!("precision"),
+                    state: StateAtom {
+                        verified: svenum!(centiMilli),
+                        unverified: None,
+                    },
+                },
+                NamedState {
+                    name: vname!("circulating"),
+                    state: StateAtom {
+                        verified: svnum!(total_supply),
+                        unverified: None,
+                    },
+                },
+            ],
+            owned: allocations
+                .into_iter()
+                .map(|(outpoint, amount)| NamedState {
+                    name: vname!("owned"),
+                    state: Assignment {
+                        seal: EitherSeal::Alt(outpoint),
+                        data: svnum!(amount),
+                    },
+                })
+                .collect(),
+        };
+        self.rt.issue_to_file(params).unwrap()
+    }
+
     pub fn build_path(&self, contract_name: &str) -> PathBuf {
         self.rt
             .mound
