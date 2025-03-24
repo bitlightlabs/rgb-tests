@@ -35,7 +35,7 @@ use utils::{
     },
     helpers::{
         broadcast_tx_and_mine, get_mainnet_wallet, get_wallet, get_wallet_custom, AssetSchema,
-        CFAIssueParams, HistoryType, NIAIssueParams, ReorgType, TransferType,
+        HistoryType, NIAIssueParams, ReorgType, TransferType,
     },
     DescriptorType, INSTANCE_2, INSTANCE_3, *,
 };

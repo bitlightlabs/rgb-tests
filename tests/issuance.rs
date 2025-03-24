@@ -3,7 +3,7 @@ pub mod utils;
 use rstest_reuse::{self, *};
 use utils::{
     chain::initialize,
-    helpers::{get_wallet, CFAIssueParams, FUAIssueParams, NIAIssueParams},
+    helpers::{get_wallet, FUAIssueParams, NIAIssueParams},
     DescriptorType, *,
 };
 
