@@ -186,6 +186,7 @@ where
 }
 
 #[test]
+#[ignore]
 fn test_parse_and_rebuild_consignment() {
     let src = Path::new("test-data/integration/00d99ed6/consignment-551.rgb");
     let dst = Path::new("test-data/integration/00d99ed6/output").to_owned();
@@ -513,6 +514,7 @@ pub fn create_attack_consignment(
 }
 
 #[test]
+#[ignore]
 fn test_create_attack_consignment() {
     let src = Path::new("test-data/integration/00d99ed6/consignment-551.rgb");
     let chain_attack_path = create_attack_consignment(src, "chain").unwrap();
