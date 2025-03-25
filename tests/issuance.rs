@@ -1,5 +1,6 @@
 pub mod utils;
 
+use ifaces::{EmbeddedMedia, MediaType, ProofOfReserves};
 use rstest_reuse::{self, *};
 use strict_types::{
     value::{Blob, StrictNum},
@@ -7,7 +8,10 @@ use strict_types::{
 };
 use utils::{
     chain::initialize,
-    helpers::{get_wallet, AssetParamsBuilder, FUAIssueParams, NIAIssueParams},
+    helpers::{
+        attachment_from_fpath, get_wallet, nft_spec, AssetParamsBuilder, FACIssueParams,
+        FUAIssueParams, NIAIssueParams,
+    },
     DescriptorType, *,
 };
 
@@ -211,36 +215,77 @@ fn issue_fac(wallet_desc: DescriptorType) {
 
     initialize();
 
-    // TODO:
     let mut wallet = get_wallet(&wallet_desc);
-    let mut default_fac = AssetParamsBuilder::default_fac().build();
 
-    for name_state in default_fac.global.iter_mut() {
-        let name = VariantName::from_str("token").unwrap();
-        if name_state.name == name {
-            let token = &mut name_state.state.verified;
-            if let StrictVal::Struct(s) = token {
-                let reserved_name = FieldName::from_str("reserved").unwrap();
-                let reserved = s.get_mut(&reserved_name).unwrap();
-                *reserved = StrictVal::Bytes(Blob(vec![0; 26]));
-            }
-        }
+    // Create FAC asset parameters
+    let mut fac_params = FACIssueParams::new(
+        "DigitalCollection",
+        "A collection of digital assets",
+        10_000,
+    );
+
+    let ticker = "TCKR";
+    let name = "asset name";
+    let details = "some details";
+    let terms_text = "Ricardian contract";
+    let terms_media_fpath = Some(MEDIA_FPATH);
+    let data = vec![1u8, 3u8, 9u8];
+    let preview_ty = "image/jpeg";
+    let token_data_preview = EmbeddedMedia {
+        ty: MediaType::with(preview_ty),
+        data: Confined::try_from(data.clone()).unwrap(),
+    };
+    let proof = vec![2u8, 4u8, 6u8, 10u8];
+    let token_data_reserves = ProofOfReserves {
+        utxo: Outpoint::from_str(FAKE_TXID).unwrap(),
+        proof: Confined::try_from(proof.clone()).unwrap(),
+    };
+    let token_data_ticker = "TDTCKR";
+    let token_data_name = "token data name";
+    let token_data_details = "token data details";
+    let token_data_attachment = attachment_from_fpath(MEDIA_FPATH);
+    let mut token_data_attachments = BTreeMap::new();
+    for (idx, attachment_fpath) in ["README.md", "Cargo.toml"].iter().enumerate() {
+        token_data_attachments.insert(idx as u8, attachment_from_fpath(attachment_fpath));
     }
 
-    for name_state in default_fac.owned.iter_mut() {
-        let name = VariantName::from_str("fractions").unwrap();
-        if name_state.name == name {
-            let fractions = &mut name_state.state;
-            let fractions_data = &mut fractions.data;
-            *fractions_data = StrictVal::Tuple(vec![
-                StrictVal::Number(StrictNum::from(0u32)),
-                StrictVal::Number(StrictNum::from(10000u64)),
-            ]);
-        }
-    }
+    let nft_spec = nft_spec(
+        ticker,
+        name,
+        details,
+        token_data_preview,
+        token_data_attachment,
+        token_data_attachments,
+        token_data_reserves,
+    );
 
-    let contract_id = wallet.issue_with_params(default_fac);
+    // Create allocation
+    let outpoint = wallet.get_utxo(None);
+    fac_params.with_allocation(outpoint, 10_000);
+    fac_params.with_nft_spec(nft_spec);
+    // Issue the contract
+    let contract_id = wallet.issue_fac_with_params(fac_params);
+    println!("FAC contract issued with ID: {}", contract_id);
 
+    // Verify contract state
+    let state = wallet
+        .contract_state(contract_id)
+        .expect("Contract state does not exist");
+
+    // Verify immutable state
+    assert_eq!(state.immutable.name, "DigitalCollection");
+
+    // Verify ownership state
+    // TODO: This needs to be refactored,
+    // the owned state of RGB21 is different from RGB20 and RGB25
+    // assert_eq!(state.owned.allocations.len(), 1);
+    // assert!(state
+    //     .owned
+    //     .allocations
+    //     .iter()
+    //     .any(|(op, amount)| *op == outpoint && *amount == 10_000));
+
+    // Output contract state information
     dbg!(
         wallet.contracts_info(),
         wallet

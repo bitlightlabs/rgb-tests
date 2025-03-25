@@ -19,9 +19,6 @@
 [submodule "bp-std"]
 	path = bp-std
 	url = https://github.com/BP-WG/bp-std
-[submodule "rgb-schemata"]
-	path = rgb-schemata
-	url = https://github.com/RGB-WG/rgb-schemata
 [submodule "strict-types"]
 	path = strict-types
 	url = https://github.com/will-bitlightlabs/strict-types.git
@@ -46,9 +43,6 @@
 [submodule "amplify-derive"]
 	path = amplify-derive
 	url = https://github.com/rust-amplify/amplify-derive.git
-[submodule "ascii-armor"]
-	path = ascii-armor
-	url = https://github.com/UBIDECO/ascii-armor.git
 [submodule "bp-esplora-client"]
 	path = bp-esplora-client
 	url = https://github.com/BP-WG/bp-esplora-client.git

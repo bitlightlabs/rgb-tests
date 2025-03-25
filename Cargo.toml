@@ -27,6 +27,7 @@ serial_test = "3.2.0"
 strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.26.2"
 time = { version = "0.3.34", features = ["formatting"] }
+indexmap = "2.7.0"
 
 # RGB-related deps
 ## bp-core
@@ -56,6 +57,8 @@ rgb-runtime = { path = "./rgb", features = [
 rgb-psbt = { path = "./rgb/psbt", features = ["bp"] }
 ## rgb-std
 rgb-std = { path = "./rgb-std", features = ["fs"] }
+## rgb-interfaces
+rgb-interfaces = { path = "./rgb-interfaces", features = ["serde"] }
 ## rust-amplify
 amplify = { path = "./rust-amplify" }
 amplify_derive = { path = "./amplify-derive" }
@@ -114,6 +117,8 @@ rgb-psbt = { path = "./rgb/psbt" }
 rgb-core = { path = "./rgb-core" }
 ## rgb-std
 rgb-std = { path = "./rgb-std" }
+## rgb-interfaces
+rgb-interfaces = { path = "./rgb-interfaces", features = ["serde"] }
 ## rust-aluvm
 aluvm = { path = "./rust-aluvm" }
 zk-aluvm = { path = "./zk-aluvm" }

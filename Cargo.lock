@@ -111,6 +111,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ascii-armor"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0269eb842ec952b027df0fc33184b6a0dea5ea473160b36992274eb53758461e"
+dependencies = [
+ "amplify",
+ "baid64",
+ "base85",
+ "sha2",
+ "strict_encoding",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -271,6 +284,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "strict_encoding",
+ "strict_types",
 ]
 
 [[package]]
@@ -1690,6 +1704,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rgb-interfaces"
+version = "0.12.0-beta.5"
+dependencies = [
+ "amplify",
+ "bp-consensus",
+ "commit_verify",
+ "getrandom",
+ "serde",
+ "strict_encoding",
+ "strict_types",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "rgb-invoice"
 version = "0.12.0-beta.5"
 dependencies = [
@@ -1772,9 +1800,11 @@ dependencies = [
  "descriptors",
  "file-format",
  "hypersonic",
+ "indexmap 2.7.0",
  "once_cell",
  "psbt",
  "rand",
+ "rgb-interfaces",
  "rgb-psbt",
  "rgb-runtime",
  "rgb-std",
@@ -2294,6 +2324,7 @@ name = "strict_types"
 version = "2.8.2"
 dependencies = [
  "amplify",
+ "ascii-armor",
  "baid64",
  "indexmap 2.7.0",
  "serde",

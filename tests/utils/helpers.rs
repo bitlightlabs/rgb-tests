@@ -1,7 +1,10 @@
+use bitcoin_hashes::{sha256, Hash};
+use indexmap::IndexMap;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
@@ -10,6 +13,10 @@ use std::time::Instant;
 
 use bp::{seals::WTxoSeal, Outpoint};
 use commit_verify::{Digest, DigestExt, Sha256};
+use ifaces::{
+    AssetName, Attachment, Details, EmbeddedMedia, MediaType, NftSpec, ProofOfReserves, Ticker,
+    TokenIndex,
+};
 use psbt::TxParams;
 use rand::RngCore;
 use rgb::invoice::{RgbBeneficiary, RgbInvoice};
@@ -22,8 +29,8 @@ use rgb::{
 use rgbp::{descriptor::RgbDescr, RgbDirRuntime, RgbWallet};
 use rgbp::{CoinselectStrategy, PayError};
 use rgpsbt::ScriptResolver;
-use strict_types::value::EnumTag;
-use strict_types::{TypeName, VariantName};
+use strict_types::value::{Blob, EnumTag, StrictNum};
+use strict_types::{FieldName, StrictEncode, TypeName, VariantName};
 
 use crate::utils::chain::fund_wallet;
 
@@ -1684,5 +1691,400 @@ impl TestWallet {
         }
 
         self.issue_with_params(dbg!(builder.build()))
+    }
+}
+
+/// Parameters for FAC (Fractionable Asset Collection) issuance
+#[derive(Clone)]
+pub struct FACIssueParams {
+    /// Collection name
+    pub name: String,
+    /// Collection details
+    pub details: String,
+    /// Total number of fractions
+    pub total_fractions: u64,
+    /// Token index
+    pub index: u32,
+    /// Initial token allocation (outpoint, amount)
+    pub initial_allocation: Option<(Outpoint, u64)>,
+    /// NFT specification
+    pub nft_spec: Option<NftSpec>,
+}
+
+impl Default for FACIssueParams {
+    fn default() -> Self {
+        Self {
+            name: "FAC".to_string(),
+            details: "Demo FAC details".to_string(),
+            total_fractions: 10_000,
+            index: UDA_FIXED_INDEX,
+            initial_allocation: None,
+            nft_spec: None,
+        }
+    }
+}
+
+impl FACIssueParams {
+    /// Create new FAC issuance parameters
+    pub fn new(name: impl Into<String>, details: impl Into<String>, total_fractions: u64) -> Self {
+        Self {
+            name: name.into(),
+            details: details.into(),
+            index: UDA_FIXED_INDEX,
+            total_fractions,
+            initial_allocation: None,
+            nft_spec: None,
+        }
+    }
+
+    /// Set token allocation
+    pub fn with_allocation(&mut self, outpoint: Outpoint, amount: u64) -> &mut Self {
+        self.initial_allocation = Some((outpoint, amount));
+        self
+    }
+
+    /// Set NFT specification
+    pub fn with_nft_spec(&mut self, nft_spec: NftSpec) -> &mut Self {
+        self.nft_spec = Some(nft_spec);
+        self
+    }
+}
+
+fn nft_spec_minimal() -> NftSpec {
+    NftSpec {
+        index: TokenIndex::from(UDA_FIXED_INDEX),
+        ..Default::default()
+    }
+}
+
+pub fn nft_spec(
+    ticker: &str,
+    name: &str,
+    details: &str,
+    preview: EmbeddedMedia,
+    media: Attachment,
+    attachments: BTreeMap<u8, Attachment>,
+    reserves: ProofOfReserves,
+) -> NftSpec {
+    let mut nft_spec = nft_spec_minimal();
+    nft_spec.preview = Some(preview);
+    nft_spec.media = Some(media);
+    nft_spec.attachments = Confined::try_from(attachments.clone()).unwrap();
+    nft_spec.reserves = Some(reserves);
+    nft_spec.ticker = Some(Ticker::try_from(ticker.to_string()).unwrap());
+    nft_spec.name = Some(AssetName::try_from(name.to_string()).unwrap());
+    nft_spec.details = Some(Details::from_str(details).unwrap());
+    nft_spec
+}
+
+// Function to create a file attachment from a file path
+pub fn attachment_from_fpath(fpath: &str) -> Attachment {
+    let file_bytes = std::fs::read(fpath).unwrap();
+    let file_hash: sha256::Hash = Hash::hash(&file_bytes[..]);
+    let digest = file_hash.to_byte_array().into();
+    let mime = FileFormat::from_file(fpath)
+        .unwrap()
+        .media_type()
+        .to_string();
+    let media_ty: &'static str = Box::leak(mime.clone().into_boxed_str());
+    let media_type = MediaType::with(media_ty);
+    Attachment {
+        ty: media_type,
+        digest,
+    }
+}
+
+impl TestWallet {
+    // TODO: Need to optimize the following code
+    /// Issue a FAC contract with custom parameters
+    pub fn issue_fac_with_params(&mut self, params: FACIssueParams) -> ContractId {
+        let mut create_params = AssetParamsBuilder::default_fac()
+            .name(params.name.as_str())
+            .update_name_state(params.name.as_str())
+            .update_details_state(params.details.as_str())
+            .build();
+
+        for name_state in create_params.global.iter_mut() {
+            let name = VariantName::from_str("token").unwrap();
+            if name_state.name == name {
+                let token = &mut name_state.state.verified;
+                if let StrictVal::Struct(s) = token {
+                    let reserved_name = FieldName::from_str("reserved").unwrap();
+                    let reserved = s.get_mut(&reserved_name).unwrap();
+                    *reserved = StrictVal::Bytes(Blob(vec![0; 26]));
+
+                    let index_name = FieldName::from_str("index").unwrap();
+                    let index = s.get_mut(&index_name).unwrap();
+                    *index = StrictVal::Number(StrictNum::from(params.index as u32));
+
+                    let amount_name = FieldName::from_str("amount").unwrap();
+                    let amount = s.get_mut(&amount_name).unwrap();
+                    *amount = StrictVal::Number(StrictNum::from(params.total_fractions as u64));
+                }
+
+                if let Some(ref nft_spec) = params.nft_spec {
+                    let nft_spec_strict_val = name_state.state.unverified.as_mut().unwrap();
+
+                    match nft_spec_strict_val {
+                        StrictVal::Struct(s) => {
+                            // pub index: TokenIndex,
+                            // pub ticker: Option<Ticker>,
+                            // pub name: Option<AssetName>,
+                            // pub details: Option<Details>,
+                            // pub preview: Option<EmbeddedMedia>,
+                            // pub media: Option<Attachment>,
+                            // pub attachments: Confined<BTreeMap<u8, Attachment>, 0, 20>,
+                            // pub reserves: Option<ProofOfReserves>,
+                            let index_name = FieldName::from_str("index").unwrap();
+                            let index = s.get_mut(&index_name).unwrap();
+                            *index = StrictVal::Number(StrictNum::from(params.index as u32));
+
+                            if let Some(ref ticker) = nft_spec.ticker {
+                                let ticker_name = FieldName::from_str("ticker").unwrap();
+                                let ticker = s.get_mut(&ticker_name).unwrap();
+                                *ticker = StrictVal::String(ticker.to_string());
+                            }
+
+                            if let Some(ref name) = nft_spec.name {
+                                let name_name = FieldName::from_str("name").unwrap();
+                                let name = s.get_mut(&name_name).unwrap();
+                                *name = StrictVal::String(name.to_string());
+                            }
+
+                            if let Some(ref details) = nft_spec.details {
+                                let details_name = FieldName::from_str("details").unwrap();
+                                let details = s.get_mut(&details_name).unwrap();
+                                *details = StrictVal::String(details.to_string());
+                            }
+
+                            if let Some(ref preview_params) = nft_spec.preview {
+                                let preview_name = FieldName::from_str("preview").unwrap();
+                                let preview = s.get_mut(&preview_name).unwrap();
+                                match preview {
+                                    StrictVal::Struct(s) => {
+                                        let preview_type_name =
+                                            FieldName::from_str("type").unwrap();
+                                        let preview_type = s.get_mut(&preview_type_name).unwrap();
+                                        match preview_type {
+                                            StrictVal::Struct(ty) => {
+                                                let ty_name = FieldName::from_str("type").unwrap();
+                                                let ty_type = ty.get_mut(&ty_name).unwrap();
+                                                *ty_type = StrictVal::String(
+                                                    preview_params.ty.ty.to_string(),
+                                                );
+
+                                                let subtype_name =
+                                                    FieldName::from_str("subtype").unwrap();
+                                                let subtype = ty.get_mut(&subtype_name).unwrap();
+
+                                                if let Some(ref subtype_params) =
+                                                    preview_params.ty.subtype
+                                                {
+                                                    *subtype = StrictVal::String(
+                                                        subtype_params.to_string(),
+                                                    );
+                                                } else {
+                                                    *subtype = StrictVal::Unit;
+                                                }
+
+                                                let charset_name =
+                                                    FieldName::from_str("charset").unwrap();
+                                                let charset = ty.get_mut(&charset_name).unwrap();
+                                                if let Some(ref charset_params) =
+                                                    preview_params.ty.charset
+                                                {
+                                                    *charset = StrictVal::String(
+                                                        charset_params.to_string(),
+                                                    );
+                                                } else {
+                                                    *charset = StrictVal::Unit;
+                                                }
+                                            }
+                                            _ => {
+                                                panic!("Invalid preview type");
+                                            }
+                                        }
+
+                                        let data_name = FieldName::from_str("data").unwrap();
+                                        let data = s.get_mut(&data_name).unwrap();
+                                        *data =
+                                            StrictVal::Bytes(Blob(preview_params.data.to_vec()));
+                                    }
+                                    _ => {
+                                        panic!("Invalid preview");
+                                    }
+                                }
+                            }
+
+                            if let Some(ref media_params) = nft_spec.media {
+                                let media_name = FieldName::from_str("media").unwrap();
+                                let media = s.get_mut(&media_name).unwrap();
+                                match media {
+                                    StrictVal::Struct(s) => {
+                                        let media_type_name = FieldName::from_str("type").unwrap();
+                                        let media_type = s.get_mut(&media_type_name).unwrap();
+                                        match media_type {
+                                            StrictVal::Struct(ty) => {
+                                                let ty_name = FieldName::from_str("type").unwrap();
+                                                let ty_type = ty.get_mut(&ty_name).unwrap();
+                                                *ty_type = StrictVal::String(
+                                                    media_params.ty.ty.to_string(),
+                                                );
+
+                                                let subtype_name =
+                                                    FieldName::from_str("subtype").unwrap();
+                                                let subtype = ty.get_mut(&subtype_name).unwrap();
+                                                if let Some(ref subtype_params) =
+                                                    media_params.ty.subtype
+                                                {
+                                                    *subtype = StrictVal::String(
+                                                        subtype_params.to_string(),
+                                                    );
+                                                } else {
+                                                    *subtype = StrictVal::Unit;
+                                                }
+
+                                                let charset_name =
+                                                    FieldName::from_str("charset").unwrap();
+                                                let charset = ty.get_mut(&charset_name).unwrap();
+                                                if let Some(ref charset_params) =
+                                                    media_params.ty.charset
+                                                {
+                                                    *charset = StrictVal::String(
+                                                        charset_params.to_string(),
+                                                    );
+                                                } else {
+                                                    *charset = StrictVal::Unit;
+                                                }
+                                            }
+                                            _ => {
+                                                panic!("Invalid media type");
+                                            }
+                                        }
+
+                                        let data_name = FieldName::from_str("digest").unwrap();
+                                        let data = s.get_mut(&data_name).unwrap();
+                                        *data =
+                                            StrictVal::Bytes(Blob(media_params.digest.to_vec()));
+                                    }
+                                    _ => {
+                                        panic!("Invalid media");
+                                    }
+                                }
+                            }
+
+                            let mut map_inner = vec![];
+                            let attachments = nft_spec.attachments.deref();
+                            for (id, attachment) in attachments {
+                                let attachments_name = FieldName::from_str("attachments").unwrap();
+                                let attachments = s.get_mut(&attachments_name).unwrap();
+
+                                // let mut attachment = StrictVal::Struct(IndexMap::new());
+                                let mut attachmet_inner: IndexMap<FieldName, StrictVal> =
+                                    IndexMap::new();
+                                let mut ty_inner: IndexMap<FieldName, StrictVal> = IndexMap::new();
+                                ty_inner.insert(
+                                    FieldName::from("type"),
+                                    StrictVal::String(attachment.ty.ty.to_string()),
+                                );
+                                ty_inner.insert(
+                                    FieldName::from("subtype"),
+                                    if let Some(ref subtype_params) = attachment.ty.subtype {
+                                        StrictVal::String(subtype_params.to_string())
+                                    } else {
+                                        StrictVal::Unit
+                                    },
+                                );
+                                ty_inner.insert(
+                                    FieldName::from("charset"),
+                                    if let Some(ref charset_params) = attachment.ty.charset {
+                                        StrictVal::String(charset_params.to_string())
+                                    } else {
+                                        StrictVal::Unit
+                                    },
+                                );
+
+                                attachmet_inner
+                                    .insert(FieldName::from("type"), StrictVal::Struct(ty_inner));
+                                attachmet_inner.insert(
+                                    FieldName::from("digest"),
+                                    StrictVal::Bytes(Blob(attachment.digest.to_vec())),
+                                );
+
+                                map_inner.push((
+                                    StrictVal::Number(StrictNum::from(*id as u8)),
+                                    StrictVal::Struct(attachmet_inner),
+                                ));
+                            }
+
+                            let attachments_name = FieldName::from_str("attachments").unwrap();
+                            let attachments_val = s.get_mut(&attachments_name).unwrap();
+                            *attachments_val = StrictVal::Map(map_inner);
+
+                            if let Some(ref reserves_params) = nft_spec.reserves {
+                                let reserves_name = FieldName::from_str("reserves").unwrap();
+                                let reserves = s.get_mut(&reserves_name).unwrap();
+                                match reserves {
+                                    StrictVal::Struct(s) => {
+                                        let utxo_name = FieldName::from_str("utxo").unwrap();
+                                        let utxo = s.get_mut(&utxo_name).unwrap();
+                                        match utxo {
+                                            StrictVal::Struct(s) => {
+                                                let txid_name =
+                                                    FieldName::from_str("txid").unwrap();
+                                                let txid = s.get_mut(&txid_name).unwrap();
+                                                *txid = StrictVal::Bytes(Blob(
+                                                    reserves_params.utxo.txid.to_inner().to_vec(),
+                                                ));
+
+                                                let vout_name =
+                                                    FieldName::from_str("vout").unwrap();
+                                                let vout = s.get_mut(&vout_name).unwrap();
+                                                *vout = StrictVal::Number(StrictNum::from(
+                                                    reserves_params.utxo.vout.into_u32(),
+                                                ));
+                                            }
+                                            _ => {
+                                                panic!("Invalid utxo");
+                                            }
+                                        }
+
+                                        let proof_name = FieldName::from_str("proof").unwrap();
+                                        let proof = s.get_mut(&proof_name).unwrap();
+                                        *proof =
+                                            StrictVal::Bytes(Blob(reserves_params.proof.to_vec()));
+                                    }
+                                    _ => {
+                                        panic!("Invalid reserves");
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            panic!("Invalid NFT spec");
+                        }
+                    }
+
+                    //  let nft_s = serde_yaml::to_string(&nft_spec).unwrap();
+                    //  println!("{nft_s}");
+                    // *name_state.state.verified = StrictVal::Bytes(Blob(writer));
+                }
+            }
+        }
+
+        for name_state in create_params.owned.iter_mut() {
+            let name = VariantName::from_str("fractions").unwrap();
+            if name_state.name == name {
+                let fractions = &mut name_state.state;
+                let fractions_data = &mut fractions.data;
+                *fractions_data = StrictVal::Tuple(vec![
+                    StrictVal::Number(StrictNum::from(params.index as u32)),
+                    StrictVal::Number(StrictNum::from(params.total_fractions as u64)),
+                ]);
+            }
+        }
+
+        let contract_id = self.issue_with_params(create_params);
+        contract_id
     }
 }
