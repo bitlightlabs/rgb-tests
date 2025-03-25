@@ -24,7 +24,7 @@
 	url = https://github.com/RGB-WG/rgb-schemata
 [submodule "strict-types"]
 	path = strict-types
-	url = https://github.com/strict-types/strict-types
+	url = https://github.com/will-bitlightlabs/strict-types.git
 [submodule "strict-encoding"]
 	path = strict-encoding
 	url = https://github.com/strict-types/strict-encoding

@@ -57,6 +57,13 @@ impl AssetParamsBuilder {
         }
     }
 
+    /// Create a new builder instance for fractionable asset collection
+    pub fn default_fac() -> Self {
+        Self {
+            params: Self::from_file(FRACTIONABLE_ASSET_COLLECTION_TEMPLATE_PATH),
+        }
+    }
+
     /// Load parameters from YAML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> CreateParams<Outpoint> {
         let file = File::open(path).expect("Unable to open file");
@@ -1676,6 +1683,6 @@ impl TestWallet {
             builder = builder.add_owned_state(outpoint, amount);
         }
 
-        self.issue_with_params(builder.build())
+        self.issue_with_params(dbg!(builder.build()))
     }
 }

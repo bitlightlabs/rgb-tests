@@ -1,9 +1,13 @@
 pub mod utils;
 
 use rstest_reuse::{self, *};
+use strict_types::{
+    value::{Blob, StrictNum},
+    VariantName,
+};
 use utils::{
     chain::initialize,
-    helpers::{get_wallet, FUAIssueParams, NIAIssueParams},
+    helpers::{get_wallet, AssetParamsBuilder, FUAIssueParams, NIAIssueParams},
     DescriptorType, *,
 };
 
@@ -13,8 +17,6 @@ const MEDIA_FPATH: &str = "tests/fixtures/rgb_logo.jpeg";
 #[template]
 #[rstest]
 #[case(DescriptorType::Wpkh)]
-#[case(DescriptorType::Wpkh)]
-#[case(DescriptorType::Tr)]
 #[case(DescriptorType::Tr)]
 fn descriptor_and_close_method(#[case] wallet_desc: DescriptorType) {}
 
@@ -201,6 +203,51 @@ fn issue_nia_multiple_utxos(wallet_desc: DescriptorType) {
         .map(|(_, amount)| amount)
         .sum();
     assert_eq!(total_allocated, 999);
+}
+
+#[apply(descriptor_and_close_method)]
+fn issue_fac(wallet_desc: DescriptorType) {
+    println!("wallet_desc {wallet_desc:?}");
+
+    initialize();
+
+    // TODO:
+    let mut wallet = get_wallet(&wallet_desc);
+    let mut default_fac = AssetParamsBuilder::default_fac().build();
+
+    for name_state in default_fac.global.iter_mut() {
+        let name = VariantName::from_str("token").unwrap();
+        if name_state.name == name {
+            let token = &mut name_state.state.verified;
+            if let StrictVal::Struct(s) = token {
+                let reserved_name = FieldName::from_str("reserved").unwrap();
+                let reserved = s.get_mut(&reserved_name).unwrap();
+                *reserved = StrictVal::Bytes(Blob(vec![0; 26]));
+            }
+        }
+    }
+
+    for name_state in default_fac.owned.iter_mut() {
+        let name = VariantName::from_str("fractions").unwrap();
+        if name_state.name == name {
+            let fractions = &mut name_state.state;
+            let fractions_data = &mut fractions.data;
+            *fractions_data = StrictVal::Tuple(vec![
+                StrictVal::Number(StrictNum::from(0u32)),
+                StrictVal::Number(StrictNum::from(10000u64)),
+            ]);
+        }
+    }
+
+    let contract_id = wallet.issue_with_params(default_fac);
+
+    dbg!(
+        wallet.contracts_info(),
+        wallet
+            .runtime()
+            .state_all(Some(contract_id))
+            .collect::<Vec<_>>()
+    );
 }
 
 // TODO: RGB official is improving the feature of uda asset, will add test after it's ready
