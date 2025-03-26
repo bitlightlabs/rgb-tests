@@ -2,15 +2,10 @@ pub mod utils;
 
 use ifaces::{EmbeddedMedia, MediaType, ProofOfReserves};
 use rstest_reuse::{self, *};
-use strict_types::{
-    value::{Blob, StrictNum},
-    VariantName,
-};
 use utils::{
     chain::initialize,
     helpers::{
-        attachment_from_fpath, get_wallet, nft_spec, AssetParamsBuilder, FACIssueParams,
-        FUAIssueParams, NIAIssueParams,
+        attachment_from_fpath, get_wallet, nft_spec, FACIssueParams, FUAIssueParams, NIAIssueParams,
     },
     DescriptorType, *,
 };
@@ -227,8 +222,6 @@ fn issue_fac(wallet_desc: DescriptorType) {
     let ticker = "TCKR";
     let name = "asset name";
     let details = "some details";
-    let terms_text = "Ricardian contract";
-    let terms_media_fpath = Some(MEDIA_FPATH);
     let data = vec![1u8, 3u8, 9u8];
     let preview_ty = "image/jpeg";
     let token_data_preview = EmbeddedMedia {
@@ -240,9 +233,6 @@ fn issue_fac(wallet_desc: DescriptorType) {
         utxo: Outpoint::from_str(FAKE_TXID).unwrap(),
         proof: Confined::try_from(proof.clone()).unwrap(),
     };
-    let token_data_ticker = "TDTCKR";
-    let token_data_name = "token data name";
-    let token_data_details = "token data details";
     let token_data_attachment = attachment_from_fpath(MEDIA_FPATH);
     let mut token_data_attachments = BTreeMap::new();
     for (idx, attachment_fpath) in ["README.md", "Cargo.toml"].iter().enumerate() {
@@ -286,13 +276,15 @@ fn issue_fac(wallet_desc: DescriptorType) {
     //     .any(|(op, amount)| *op == outpoint && *amount == 10_000));
 
     // Output contract state information
-    dbg!(
-        wallet.contracts_info(),
-        wallet
-            .runtime()
-            .state_all(Some(contract_id))
-            .collect::<Vec<_>>()
-    );
+    // dbg!(
+    //     wallet.contracts_info(),
+    //     wallet
+    //         .runtime()
+    //         .state_all(Some(contract_id))
+    //         .collect::<Vec<_>>()
+    // );
+
+    dbg!(wallet.contract_state_rgb21(contract_id));
 }
 
 // TODO: RGB official is improving the feature of uda asset, will add test after it's ready

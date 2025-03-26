@@ -30,7 +30,7 @@ use rgbp::{descriptor::RgbDescr, RgbDirRuntime, RgbWallet};
 use rgbp::{CoinselectStrategy, PayError};
 use rgpsbt::ScriptResolver;
 use strict_types::value::{Blob, EnumTag, StrictNum};
-use strict_types::{FieldName, StrictEncode, TypeName, VariantName};
+use strict_types::{FieldName, TypeName, VariantName};
 
 use crate::utils::chain::fund_wallet;
 
@@ -1827,34 +1827,26 @@ impl TestWallet {
 
                     match nft_spec_strict_val {
                         StrictVal::Struct(s) => {
-                            // pub index: TokenIndex,
-                            // pub ticker: Option<Ticker>,
-                            // pub name: Option<AssetName>,
-                            // pub details: Option<Details>,
-                            // pub preview: Option<EmbeddedMedia>,
-                            // pub media: Option<Attachment>,
-                            // pub attachments: Confined<BTreeMap<u8, Attachment>, 0, 20>,
-                            // pub reserves: Option<ProofOfReserves>,
                             let index_name = FieldName::from_str("index").unwrap();
                             let index = s.get_mut(&index_name).unwrap();
                             *index = StrictVal::Number(StrictNum::from(params.index as u32));
 
-                            if let Some(ref ticker) = nft_spec.ticker {
+                            if let Some(ref ticker_params) = nft_spec.ticker {
                                 let ticker_name = FieldName::from_str("ticker").unwrap();
                                 let ticker = s.get_mut(&ticker_name).unwrap();
-                                *ticker = StrictVal::String(ticker.to_string());
+                                *ticker = StrictVal::String(ticker_params.to_string());
                             }
 
-                            if let Some(ref name) = nft_spec.name {
+                            if let Some(ref name_params) = nft_spec.name {
                                 let name_name = FieldName::from_str("name").unwrap();
                                 let name = s.get_mut(&name_name).unwrap();
-                                *name = StrictVal::String(name.to_string());
+                                *name = StrictVal::String(name_params.to_string());
                             }
 
-                            if let Some(ref details) = nft_spec.details {
+                            if let Some(ref details_params) = nft_spec.details {
                                 let details_name = FieldName::from_str("details").unwrap();
                                 let details = s.get_mut(&details_name).unwrap();
-                                *details = StrictVal::String(details.to_string());
+                                *details = StrictVal::String(details_params.to_string());
                             }
 
                             if let Some(ref preview_params) = nft_spec.preview {
@@ -1976,9 +1968,6 @@ impl TestWallet {
                             let mut map_inner = vec![];
                             let attachments = nft_spec.attachments.deref();
                             for (id, attachment) in attachments {
-                                let attachments_name = FieldName::from_str("attachments").unwrap();
-                                let attachments = s.get_mut(&attachments_name).unwrap();
-
                                 // let mut attachment = StrictVal::Struct(IndexMap::new());
                                 let mut attachmet_inner: IndexMap<FieldName, StrictVal> =
                                     IndexMap::new();
@@ -2064,10 +2053,6 @@ impl TestWallet {
                             panic!("Invalid NFT spec");
                         }
                     }
-
-                    //  let nft_s = serde_yaml::to_string(&nft_spec).unwrap();
-                    //  println!("{nft_s}");
-                    // *name_state.state.verified = StrictVal::Bytes(Blob(writer));
                 }
             }
         }
@@ -2086,5 +2071,475 @@ impl TestWallet {
 
         let contract_id = self.issue_with_params(create_params);
         contract_id
+    }
+}
+
+/// Immutable state part of RGB21 contract
+#[derive(Debug, Clone)]
+pub struct RGB21ContractImmutableState {
+    pub name: String,
+    pub total_fractions: u64,
+    pub token: Option<NFTMetadata>,
+}
+
+/// NFT metadata in RGB21 contract
+#[derive(Debug, Clone)]
+pub struct NFTMetadata {
+    pub index: u32,
+    pub amount: u64,
+    pub ticker: Option<String>,
+    pub name: Option<String>,
+    pub details: Option<String>,
+    pub preview: Option<MediaData>,
+    pub media: Option<MediaDigest>,
+    pub attachments: BTreeMap<u8, MediaDigest>,
+    pub reserves: Option<ReserveData>,
+}
+
+/// Media data with full content
+#[derive(Debug, Clone)]
+pub struct MediaData {
+    pub media_type: MediaTypeData,
+    pub data: Vec<u8>,
+}
+
+/// Media type information
+#[derive(Debug, Clone)]
+pub struct MediaTypeData {
+    pub r#type: String,
+    pub subtype: Option<String>,
+    pub charset: Option<String>,
+}
+
+/// Media digest (reference only)
+#[derive(Debug, Clone)]
+pub struct MediaDigest {
+    pub media_type: MediaTypeData,
+    pub digest: Vec<u8>,
+}
+
+/// Reserve proof data
+#[derive(Debug, Clone)]
+pub struct ReserveData {
+    pub utxo: Outpoint,
+    pub proof: Vec<u8>,
+}
+
+/// Owned state part of RGB21 contract
+#[derive(Debug, Clone)]
+pub struct RGB21ContractOwnedState {
+    pub fractions: Vec<(Outpoint, u32, u64)>, // (outpoint, index, amount)
+}
+
+/// Complete RGB21 contract state
+#[derive(Debug, Clone)]
+pub struct RGB21ContractState {
+    pub immutable: RGB21ContractImmutableState,
+    pub owned: RGB21ContractOwnedState,
+}
+
+/// Extract the first element from a tuple
+fn extract_from_tuple(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Tuple(s) = v {
+        if !s.is_empty() {
+            Some(s[0].clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// Extract the first element from a two-layer tuple
+fn extract_from_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Tuple(t) = v {
+        if let Some(inner) = t.get(0) {
+            extract_from_tuple(inner)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// Extract value from Union (for Option type)
+fn extract_from_union(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Union(tag, t) = v {
+        if let EnumTag::Name(name) = tag {
+            if ***name == "some" {
+                Some(t.as_ref().clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/// Extract value from Union and single-layer Tuple
+fn extract_from_union_and_tuple(v: &StrictVal) -> Option<StrictVal> {
+    extract_from_union(v).and_then(|s| extract_from_tuple(&s))
+}
+
+/// Extract value from Union and two-layer Tuple
+fn extract_from_union_and_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
+    extract_from_union(v).and_then(|s| extract_from_2_layer_tuple(&s))
+}
+
+impl TestWallet {
+    /// Get RGB21 contract state
+    pub fn contract_state_rgb21(&mut self, contract_id: ContractId) -> Option<RGB21ContractState> {
+        self.contract_state_internal(contract_id)
+            .map(|(immutable, owned, _)| {
+                // Parse immutable state
+                let name = immutable
+                    .get(&VariantName::from_str("name").unwrap())
+                    .and_then(|m| m.values().next())
+                    .map(|v| v.verified.unwrap_string())
+                    .unwrap_or_default();
+
+                let total_fractions = immutable
+                    .get(&VariantName::from_str("fractions").unwrap())
+                    .and_then(|m| m.values().next())
+                    .map(|v| v.verified.unwrap_num().unwrap_uint::<u64>())
+                    .unwrap_or_default();
+
+                // Parse token/NFT metadata
+                let token = immutable
+                    .get(&VariantName::from_str("token").unwrap())
+                    .and_then(|m| m.values().next())
+                    .map(|v| {
+                        let mut index = 0u32;
+                        let mut amount = 0u64;
+
+                        // Parse verified token data
+                        if let StrictVal::Struct(ref s) = v.verified {
+                            if let Some(StrictVal::Number(n)) =
+                                s.get(&FieldName::from_str("index").unwrap())
+                            {
+                                index = n.unwrap_uint::<u32>();
+                            }
+                            if let Some(StrictVal::Number(n)) =
+                                s.get(&FieldName::from_str("amount").unwrap())
+                            {
+                                amount = n.unwrap_uint::<u64>();
+                            }
+                        }
+
+                        // Parse unverified token metadata
+                        let mut ticker = None;
+                        let mut name = None;
+                        let mut details = None;
+                        let mut preview = None;
+                        let mut media = None;
+                        let mut attachments = BTreeMap::new();
+                        let mut reserves = None;
+
+                        if let Some(ref unverified) = v.unverified {
+                            if let StrictVal::Struct(ref s) = unverified {
+                                if let Some(StrictVal::Union(_, t)) =
+                                    s.get(&FieldName::from_str("ticker").unwrap())
+                                {
+                                    ticker =
+                                        extract_from_2_layer_tuple(t).map(|s| s.unwrap_string());
+                                }
+
+                                if let Some(StrictVal::Union(_, t)) =
+                                    s.get(&FieldName::from_str("name").unwrap())
+                                {
+                                    name = extract_from_2_layer_tuple(t).map(|s| s.unwrap_string());
+                                }
+
+                                if let Some(StrictVal::Union(_, t)) =
+                                    s.get(&FieldName::from_str("details").unwrap())
+                                {
+                                    details =
+                                        extract_from_2_layer_tuple(t).map(|s| s.unwrap_string());
+                                }
+
+                                // Parse preview
+                                let preview_struct = s
+                                    .get(&FieldName::from_str("preview").unwrap())
+                                    .and_then(|v| extract_from_union_and_tuple(v));
+
+                                if let Some(StrictVal::Struct(ref p)) = preview_struct {
+                                    let media_type = if let Some(StrictVal::Struct(ref t)) =
+                                        p.get(&FieldName::from_str("type").unwrap())
+                                    {
+                                        let type_value = t
+                                            .get(&FieldName::from_str("type").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_tuple(v).map(|s| s.unwrap_string())
+                                            })
+                                            .unwrap_or_default();
+
+                                        let subtype = t
+                                            .get(&FieldName::from_str("subtype").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_union_and_2_layer_tuple(v)
+                                                    .map(|s| s.unwrap_string())
+                                            });
+
+                                        let charset = t
+                                            .get(&FieldName::from_str("charset").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_union_and_2_layer_tuple(v)
+                                                    .map(|s| s.unwrap_string())
+                                            });
+
+                                        MediaTypeData {
+                                            r#type: type_value,
+                                            subtype,
+                                            charset,
+                                        }
+                                    } else {
+                                        MediaTypeData {
+                                            r#type: "".to_string(),
+                                            subtype: None,
+                                            charset: None,
+                                        }
+                                    };
+
+                                    let data = if let Some(StrictVal::Bytes(Blob(d))) =
+                                        p.get(&FieldName::from_str("data").unwrap())
+                                    {
+                                        d.clone()
+                                    } else {
+                                        vec![]
+                                    };
+
+                                    preview = Some(MediaData { media_type, data });
+                                }
+
+                                // Parse media
+                                let media_struct = s
+                                    .get(&FieldName::from_str("media").unwrap())
+                                    .and_then(|v| extract_from_union_and_tuple(v));
+
+                                if let Some(StrictVal::Struct(ref m)) = media_struct {
+                                    let media_type = if let Some(StrictVal::Struct(ref t)) =
+                                        m.get(&FieldName::from_str("type").unwrap())
+                                    {
+                                        let type_value = t
+                                            .get(&FieldName::from_str("type").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_tuple(v).map(|s| s.unwrap_string())
+                                            })
+                                            .unwrap_or_default();
+
+                                        let subtype = t
+                                            .get(&FieldName::from_str("subtype").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_union_and_2_layer_tuple(v)
+                                                    .map(|s| s.unwrap_string())
+                                            });
+
+                                        let charset = t
+                                            .get(&FieldName::from_str("charset").unwrap())
+                                            .and_then(|v| {
+                                                extract_from_union_and_2_layer_tuple(v)
+                                                    .map(|s| s.unwrap_string())
+                                            });
+
+                                        MediaTypeData {
+                                            r#type: type_value,
+                                            subtype,
+                                            charset,
+                                        }
+                                    } else {
+                                        MediaTypeData {
+                                            r#type: "".to_string(),
+                                            subtype: None,
+                                            charset: None,
+                                        }
+                                    };
+
+                                    let digest = if let Some(StrictVal::Bytes(Blob(d))) =
+                                        m.get(&FieldName::from_str("digest").unwrap())
+                                    {
+                                        d.clone()
+                                    } else {
+                                        vec![]
+                                    };
+
+                                    media = Some(MediaDigest { media_type, digest });
+                                }
+
+                                // Parse attachments
+                                if let Some(StrictVal::Map(ref atts)) =
+                                    s.get(&FieldName::from_str("attachments").unwrap())
+                                {
+                                    for (key, value) in atts {
+                                        if let (
+                                            StrictVal::Number(idx),
+                                            StrictVal::Struct(ref att),
+                                        ) = (key, value)
+                                        {
+                                            let media_type = if let Some(StrictVal::Struct(ref t)) =
+                                                att.get(&FieldName::from_str("type").unwrap())
+                                            {
+                                                let type_value = t
+                                                    .get(&FieldName::from_str("type").unwrap())
+                                                    .and_then(|v| {
+                                                        extract_from_tuple(v)
+                                                            .map(|s| s.unwrap_string())
+                                                    })
+                                                    .unwrap_or_default();
+
+                                                let subtype = t
+                                                    .get(&FieldName::from_str("subtype").unwrap())
+                                                    .and_then(|v| {
+                                                        extract_from_union_and_2_layer_tuple(v)
+                                                            .map(|s| s.unwrap_string())
+                                                    });
+
+                                                let charset = t
+                                                    .get(&FieldName::from_str("charset").unwrap())
+                                                    .and_then(|v| {
+                                                        extract_from_union_and_2_layer_tuple(v)
+                                                            .map(|s| s.unwrap_string())
+                                                    });
+
+                                                MediaTypeData {
+                                                    r#type: type_value,
+                                                    subtype,
+                                                    charset,
+                                                }
+                                            } else {
+                                                MediaTypeData {
+                                                    r#type: "".to_string(),
+                                                    subtype: None,
+                                                    charset: None,
+                                                }
+                                            };
+
+                                            let digest = if let Some(StrictVal::Bytes(Blob(d))) =
+                                                att.get(&FieldName::from_str("digest").unwrap())
+                                            {
+                                                d.clone()
+                                            } else {
+                                                vec![]
+                                            };
+
+                                            let attachment = MediaDigest { media_type, digest };
+
+                                            attachments.insert(idx.unwrap_uint::<u8>(), attachment);
+                                        }
+                                    }
+                                }
+
+                                // Parse reserves
+                                let reserves_struct = s
+                                    .get(&FieldName::from_str("reserves").unwrap())
+                                    .and_then(|v| extract_from_union_and_tuple(v));
+
+                                if let Some(StrictVal::Struct(ref r)) = reserves_struct {
+                                    if let Some(StrictVal::Struct(ref u)) =
+                                        r.get(&FieldName::from_str("utxo").unwrap())
+                                    {
+                                        let txid_bytes = u
+                                            .get(&FieldName::from_str("txid").unwrap())
+                                            .and_then(|v| extract_from_tuple(v))
+                                            .and_then(|v| {
+                                                if let StrictVal::Bytes(Blob(tx)) = v {
+                                                    Some(tx)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .unwrap_or_default();
+
+                                        let vout = u
+                                            .get(&FieldName::from_str("vout").unwrap())
+                                            .and_then(|v| extract_from_tuple(v))
+                                            .and_then(|v| {
+                                                if let StrictVal::Number(n) = v {
+                                                    Some(n.unwrap_uint::<u32>())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .unwrap_or_default();
+
+                                        let txid = if txid_bytes.len() == 32 {
+                                            let mut arr = [0u8; 32];
+                                            arr.copy_from_slice(&txid_bytes);
+                                            Txid::from_byte_array(arr)
+                                        } else {
+                                            // default txid
+                                            Txid::coinbase()
+                                        };
+
+                                        let outpoint = Outpoint::new(txid, vout);
+
+                                        let proof = if let Some(StrictVal::Bytes(Blob(p))) =
+                                            r.get(&FieldName::from_str("proof").unwrap())
+                                        {
+                                            p.clone()
+                                        } else {
+                                            vec![]
+                                        };
+
+                                        reserves = Some(ReserveData {
+                                            utxo: outpoint,
+                                            proof,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        NFTMetadata {
+                            index,
+                            amount,
+                            ticker,
+                            name,
+                            details,
+                            preview,
+                            media,
+                            attachments,
+                            reserves,
+                        }
+                    });
+
+                // Parse ownership state (fractions)
+                let mut fractions = vec![];
+                if let Some(owned_map) = owned.get(&VariantName::from_str("fractions").unwrap()) {
+                    for assignment in owned_map.values() {
+                        if let StrictVal::Tuple(ref tuple) = assignment.data {
+                            if tuple.len() >= 2 {
+                                let idx_val = extract_from_tuple(&tuple[0]);
+                                let amt_val = extract_from_tuple(&tuple[1]);
+
+                                if let (
+                                    Some(StrictVal::Number(idx)),
+                                    Some(StrictVal::Number(amount)),
+                                ) = (idx_val, amt_val)
+                                {
+                                    fractions.push((
+                                        assignment.seal,
+                                        idx.unwrap_uint::<u32>(),
+                                        amount.unwrap_uint::<u64>(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RGB21ContractState {
+                    immutable: RGB21ContractImmutableState {
+                        name,
+                        total_fractions,
+                        token,
+                    },
+                    owned: RGB21ContractOwnedState { fractions },
+                }
+            })
     }
 }
