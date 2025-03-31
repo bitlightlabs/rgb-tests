@@ -243,10 +243,10 @@ fn issue_fac(wallet_desc: DescriptorType) {
         ticker,
         name,
         details,
-        token_data_preview,
-        token_data_attachment,
-        token_data_attachments,
-        token_data_reserves,
+        token_data_preview.clone(),
+        token_data_attachment.clone(),
+        token_data_attachments.clone(),
+        token_data_reserves.clone(),
     );
 
     // Create allocation
@@ -257,117 +257,43 @@ fn issue_fac(wallet_desc: DescriptorType) {
     let contract_id = wallet.issue_fac_with_params(fac_params);
     println!("FAC contract issued with ID: {}", contract_id);
 
-    // Verify contract state
-    let state = wallet
-        .contract_state(contract_id)
-        .expect("Contract state does not exist");
+    let state = wallet.contract_state_rgb21(contract_id).unwrap();
+    let token = state.immutable.token.unwrap();
+    assert_eq!(state.immutable.name.as_str(), "DigitalCollection");
+    assert_eq!(state.immutable.total_fractions, 10_000);
+    assert_eq!(token.ticker.unwrap().to_string(), ticker);
+    assert_eq!(token.name.unwrap().to_string(), name);
+    assert_eq!(token.details.unwrap().to_string(), details);
+    assert_eq!(
+        token.preview.as_ref().unwrap().media_type.r#type.as_str(),
+        token_data_preview.ty.ty.as_str()
+    );
 
-    // Verify immutable state
-    assert_eq!(state.immutable.name, "DigitalCollection");
+    assert_eq!(
+        token.preview.as_ref().unwrap().data.as_slice(),
+        token_data_preview.data.as_slice()
+    );
+    assert_eq!(
+        token.media.as_ref().unwrap().digest.as_slice(),
+        token_data_attachment.digest.as_slice()
+    );
+    // token_data_attachments
+    for (idx, attachment) in token.attachments.iter() {
+        assert_eq!(
+            attachment.digest.as_slice(),
+            token_data_attachments[idx].digest.as_slice()
+        );
+    }
+    assert_eq!(
+        token.reserves.as_ref().unwrap().utxo.to_string(),
+        token_data_reserves.utxo.to_string()
+    );
+    assert_eq!(
+        token.reserves.as_ref().unwrap().proof.as_slice(),
+        token_data_reserves.proof.as_slice()
+    );
 
-    // Verify ownership state
-    // TODO: This needs to be refactored,
-    // the owned state of RGB21 is different from RGB20 and RGB25
-    // assert_eq!(state.owned.allocations.len(), 1);
-    // assert!(state
-    //     .owned
-    //     .allocations
-    //     .iter()
-    //     .any(|(op, amount)| *op == outpoint && *amount == 10_000));
-
-    // Output contract state information
-    // dbg!(
-    //     wallet.contracts_info(),
-    //     wallet
-    //         .runtime()
-    //         .state_all(Some(contract_id))
-    //         .collect::<Vec<_>>()
-    // );
-
-    dbg!(wallet.contract_state_rgb21(contract_id));
+    assert_eq!(state.owned.fractions.len(), 1);
+    assert_eq!(state.owned.fractions[0].0.to_string(), outpoint.to_string());
+    assert_eq!(state.owned.fractions[0].1, 10_000);
 }
-
-// TODO: RGB official is improving the feature of uda asset, will add test after it's ready
-// #[apply(descriptor_and_close_method)]
-// fn issue_uda(wallet_desc: DescriptorType) {
-//     println!("wallet_desc {wallet_desc:?} ");
-
-//     initialize();
-
-//     let mut wallet = get_wallet(&wallet_desc);
-
-//     let ticker = "TCKR";
-//     let name = "asset name";
-//     let details = Some("some details");
-//     let terms_text = "Ricardian contract";
-//     let terms_media_fpath = Some(MEDIA_FPATH);
-//     let data = vec![1u8, 3u8, 9u8];
-//     let preview_ty = "image/jpeg";
-//     let token_data_preview = EmbeddedMedia {
-//         ty: MediaType::with(preview_ty),
-//         data: Confined::try_from(data.clone()).unwrap(),
-//     };
-//     let proof = vec![2u8, 4u8, 6u8, 10u8];
-//     let token_data_reserves = ProofOfReserves {
-//         utxo: Outpoint::from_str(FAKE_TXID).unwrap(),
-//         proof: Confined::try_from(proof.clone()).unwrap(),
-//     };
-//     let token_data_ticker = "TDTCKR";
-//     let token_data_name = "token data name";
-//     let token_data_details = "token data details";
-//     let token_data_attachment = attachment_from_fpath(MEDIA_FPATH);
-//     let mut token_data_attachments = BTreeMap::new();
-//     for (idx, attachment_fpath) in ["README.md", "Cargo.toml"].iter().enumerate() {
-//         token_data_attachments.insert(idx as u8, attachment_from_fpath(attachment_fpath));
-//     }
-//     let token_data = uda_token_data(
-//         token_data_ticker,
-//         token_data_name,
-//         token_data_details,
-//         token_data_preview.clone(),
-//         token_data_attachment.clone(),
-//         token_data_attachments.clone(),
-//         token_data_reserves.clone(),
-//     );
-//     let asset_info = AssetInfo::uda(
-//         ticker,
-//         name,
-//         details,
-//         terms_text,
-//         terms_media_fpath,
-//         token_data,
-//     );
-//     let (contract_id, iface_type_name) = wallet.issue_with_info(asset_info, close_method, vec![]);
-
-//     let contract = wallet.contract_iface_class::<Rgb21>(contract_id);
-//     let spec = contract.spec();
-//     assert_eq!(spec.ticker.to_string(), ticker.to_string());
-//     assert_eq!(spec.name.to_string(), name.to_string());
-//     assert_eq!(spec.precision.decimals(), 0);
-//     let terms = contract.contract_terms();
-//     assert_eq!(terms.text.to_string(), terms_text.to_string());
-//     let terms_media = terms.media.unwrap();
-//     assert_eq!(terms_media.ty.to_string(), "image/jpeg");
-//     assert_eq!(
-//         terms_media.digest.to_string(),
-//         "02d2cc5d7883885bb7472e4fe96a07344b1d7cf794cb06943e1cdb5c57754d8a"
-//     );
-//     let token_data = contract.token_data();
-//     assert_eq!(token_data.index, TokenIndex::from(0));
-//     assert_eq!(token_data.ticker.unwrap().to_string(), token_data_ticker);
-//     assert_eq!(token_data.name.unwrap().to_string(), token_data_name);
-//     assert_eq!(token_data.details.unwrap().to_string(), token_data_details);
-//     assert_eq!(token_data.preview.unwrap(), token_data_preview);
-//     assert_eq!(token_data.media.unwrap(), token_data_attachment);
-//     assert_eq!(
-//         token_data.attachments.to_unconfined(),
-//         token_data_attachments
-//     );
-//     assert_eq!(token_data.reserves.unwrap(), token_data_reserves);
-
-//     let allocations = wallet.contract_data_allocations(contract_id, &iface_type_name);
-//     assert_eq!(allocations.len(), 1);
-//     let allocation = &allocations[0];
-//     assert_eq!(allocation.seal.method(), close_method);
-//     assert_eq!(allocation.state.to_string(), "000000000100000000000000");
-// }

@@ -15,11 +15,11 @@ global:
     verified: 10000
   - name: token
     verified:
-      index: 0
-      amount: 10000
-      # TODO: `reserved` is a 26-sized U8 array,
+      tokenIndex: 0
+      fraction: 10000
+      # TODO: `align` is a 26-sized U8 array,
       # Need to rewrite to bytes in code
-      reserved:
+      align:
     unverified:
       index: 0
       ticker: TCKR
@@ -67,8 +67,5 @@ global:
 owned:
   - name: fractions
     seal: b7116550736fbe5d3e234d0141c6bc8d1825f94da78514a3cede5674e9a5eae9:1
-    data:
-    # TODO: Expected to be parsed as tuple, but parsed as union, need to convert in code
-      - 0
-      - 10000
+    data: 10000
 

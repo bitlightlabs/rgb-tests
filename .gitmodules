@@ -4,9 +4,6 @@
 [submodule "rust-aluvm"]
 	path = rust-aluvm
 	url = https://github.com/aluvm/rust-aluvm
-[submodule "rgb-interfaces"]
-	path = rgb-interfaces
-	url = https://github.com/RGB-WG/rgb-interfaces
 [submodule "client_side_validation"]
 	path = client_side_validation
 	url = https://github.com/LNP-BP/client_side_validation/
@@ -21,7 +18,7 @@
 	url = https://github.com/BP-WG/bp-std
 [submodule "strict-types"]
 	path = strict-types
-	url = https://github.com/will-bitlightlabs/strict-types.git
+	url = https://github.com/strict-types/strict-types
 [submodule "strict-encoding"]
 	path = strict-encoding
 	url = https://github.com/strict-types/strict-encoding
@@ -64,3 +61,6 @@
 [submodule "sonic"]
 	path = sonic
 	url = https://github.com/AluVM/sonic
+[submodule "rgb-interfaces"]
+	path = rgb-interfaces
+	url = https://github.com/RGB-WG/rgb-interfaces.git

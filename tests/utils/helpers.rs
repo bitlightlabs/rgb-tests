@@ -1396,27 +1396,29 @@ impl TestWallet {
         asset_schema: AssetSchema,
         mut expected_fungible_allocations: Vec<u64>,
     ) {
-        match asset_schema {
+        let allocation_field = match asset_schema {
             AssetSchema::RGB20 | AssetSchema::RGB25 => {
                 // For fungible assets, we need to check the "amount" allocation
-                let state = self.runtime.state_own(Some(contract_id)).next().unwrap().1;
-                let allocation_field = "amount";
-                let mut actual_fungible_allocations = state
-                    .owned
-                    .get(allocation_field)
-                    .unwrap()
-                    .iter()
-                    .map(|(_, assignment)| assignment.data.unwrap_num().unwrap_uint::<u64>())
-                    .collect::<Vec<_>>();
-                actual_fungible_allocations.sort();
-                expected_fungible_allocations.sort();
-                assert_eq!(actual_fungible_allocations, expected_fungible_allocations);
+                "amount"
             }
             AssetSchema::RGB21 => {
-                // TODO: Implement UDA asset allocation checking once RGB core library support is ready
-                todo!()
+                // for RGB21, we need to check the "fractions" allocation
+                "fractions"
             }
-        }
+        };
+
+        let state = self.runtime.state_own(Some(contract_id)).next().unwrap().1;
+
+        let mut actual_fungible_allocations = state
+            .owned
+            .get(allocation_field)
+            .unwrap()
+            .iter()
+            .map(|(_, assignment)| assignment.data.unwrap_num().unwrap_uint::<u64>())
+            .collect::<Vec<_>>();
+        actual_fungible_allocations.sort();
+        expected_fungible_allocations.sort();
+        assert_eq!(actual_fungible_allocations, expected_fungible_allocations);
     }
 
     pub fn sign_finalize(&self, psbt: &mut Psbt) {
@@ -1809,15 +1811,15 @@ impl TestWallet {
             if name_state.name == name {
                 let token = &mut name_state.state.verified;
                 if let StrictVal::Struct(s) = token {
-                    let reserved_name = FieldName::from_str("reserved").unwrap();
+                    let reserved_name = FieldName::from_str("align").unwrap();
                     let reserved = s.get_mut(&reserved_name).unwrap();
                     *reserved = StrictVal::Bytes(Blob(vec![0; 26]));
 
-                    let index_name = FieldName::from_str("index").unwrap();
+                    let index_name = FieldName::from_str("tokenIndex").unwrap();
                     let index = s.get_mut(&index_name).unwrap();
                     *index = StrictVal::Number(StrictNum::from(params.index as u32));
 
-                    let amount_name = FieldName::from_str("amount").unwrap();
+                    let amount_name = FieldName::from_str("fraction").unwrap();
                     let amount = s.get_mut(&amount_name).unwrap();
                     *amount = StrictVal::Number(StrictNum::from(params.total_fractions as u64));
                 }
@@ -2061,11 +2063,11 @@ impl TestWallet {
             let name = VariantName::from_str("fractions").unwrap();
             if name_state.name == name {
                 let fractions = &mut name_state.state;
+                fractions.seal = EitherSeal::Alt(params.initial_allocation.unwrap().0);
                 let fractions_data = &mut fractions.data;
-                *fractions_data = StrictVal::Tuple(vec![
-                    StrictVal::Number(StrictNum::from(params.index as u32)),
-                    StrictVal::Number(StrictNum::from(params.total_fractions as u64)),
-                ]);
+                *fractions_data = StrictVal::Tuple(vec![StrictVal::Number(StrictNum::from(
+                    params.initial_allocation.unwrap().1,
+                ))]);
             }
         }
 
@@ -2128,7 +2130,7 @@ pub struct ReserveData {
 /// Owned state part of RGB21 contract
 #[derive(Debug, Clone)]
 pub struct RGB21ContractOwnedState {
-    pub fractions: Vec<(Outpoint, u32, u64)>, // (outpoint, index, amount)
+    pub fractions: Vec<(Outpoint, u64)>, // (outpoint, amount)
 }
 
 /// Complete RGB21 contract state
@@ -2511,24 +2513,8 @@ impl TestWallet {
                 let mut fractions = vec![];
                 if let Some(owned_map) = owned.get(&VariantName::from_str("fractions").unwrap()) {
                     for assignment in owned_map.values() {
-                        if let StrictVal::Tuple(ref tuple) = assignment.data {
-                            if tuple.len() >= 2 {
-                                let idx_val = extract_from_tuple(&tuple[0]);
-                                let amt_val = extract_from_tuple(&tuple[1]);
-
-                                if let (
-                                    Some(StrictVal::Number(idx)),
-                                    Some(StrictVal::Number(amount)),
-                                ) = (idx_val, amt_val)
-                                {
-                                    fractions.push((
-                                        assignment.seal,
-                                        idx.unwrap_uint::<u32>(),
-                                        amount.unwrap_uint::<u64>(),
-                                    ));
-                                }
-                            }
-                        }
+                        let amt_val = assignment.data.unwrap_num().unwrap_uint::<u64>();
+                        fractions.push((assignment.seal, amt_val));
                     }
                 }
 

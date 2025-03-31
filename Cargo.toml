@@ -118,7 +118,7 @@ rgb-core = { path = "./rgb-core" }
 ## rgb-std
 rgb-std = { path = "./rgb-std" }
 ## rgb-interfaces
-rgb-interfaces = { path = "./rgb-interfaces", features = ["serde"] }
+rgb-interfaces = { path = "./rgb-interfaces" }
 ## rust-aluvm
 aluvm = { path = "./rust-aluvm" }
 zk-aluvm = { path = "./zk-aluvm" }
