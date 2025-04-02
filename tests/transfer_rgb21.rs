@@ -125,7 +125,7 @@ fn simple_fac_transfer(wout: bool) {
     wlt_2.accept_transfer(&consignment_1, None).unwrap();
 
     // Broadcast and confirm transaction
-    wlt_1.mine_tx(&tx.txid(), true);
+    wlt_1.mine_tx(&tx.txid(), false);
 
     // Sync both wallets
     wlt_1.sync();
@@ -178,7 +178,7 @@ fn simple_fac_transfer(wout: bool) {
     wlt_1.accept_transfer(&consignment_2, None).unwrap();
 
     // Broadcast and confirm transaction
-    wlt_2.mine_tx(&tx.txid(), true);
+    wlt_2.mine_tx(&tx.txid(), false);
 
     // Sync both wallets
     wlt_1.sync();

@@ -1267,8 +1267,7 @@ impl TestWallet {
         let transfer_report = report.as_deref_mut();
 
         let (consignment, tx) = self.transfer(invoice, sats, fee, true, transfer_report);
-        broadcast_tx_and_mine(&tx, self.instance);
-
+        self.mine_tx(&tx.txid(), false);
         // Now use the original report parameter
         recv_wallet.accept_transfer(&consignment, report).unwrap();
         self.sync();

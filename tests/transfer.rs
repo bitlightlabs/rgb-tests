@@ -82,7 +82,7 @@ fn simple_transfer(wout: bool) {
     wlt_2.accept_transfer(&consignment_1, None).unwrap();
 
     // Broadcast and confirm transaction
-    wlt_1.mine_tx(&tx.txid(), true);
+    wlt_1.mine_tx(&tx.txid(), false);
 
     // Sync both wallets
     wlt_1.sync();
@@ -101,7 +101,7 @@ fn simple_transfer(wout: bool) {
     // Sats cost: 500 fee + 2000 sats(default) = 2500
     let (consignment_2, tx) = wlt_2.transfer(invoice, None, Some(500), true, None);
     wlt_1.accept_transfer(&consignment_2, None).unwrap();
-    wlt_2.mine_tx(&tx.txid(), true);
+    wlt_2.mine_tx(&tx.txid(), false);
 
     // // Sync both wallets
     wlt_1.sync();
@@ -610,16 +610,16 @@ fn same_transfer_twice_no_update_witnesses(#[case] transfer_type: TransferType) 
     let invoice = wlt_2.invoice(contract_id, amount, wout, Some(0), None);
     let _ = wlt_1.transfer(invoice.clone(), None, Some(500), false, None);
 
-    dbg!(wlt_1
-        .runtime()
-        .state_all(None)
-        .map(|(_, s)| { s.owned })
-        .collect::<Vec<_>>());
-    dbg!(wlt_1
-        .runtime()
-        .state_own(None)
-        .map(|(_, s)| { s.owned })
-        .collect::<Vec<_>>());
+    // dbg!(wlt_1
+    //     .runtime()
+    //     .state_all(None)
+    //     .map(|(_, s)| { s.owned })
+    //     .collect::<Vec<_>>());
+    // dbg!(wlt_1
+    //     .runtime()
+    //     .state_own(None)
+    //     .map(|(_, s)| { s.owned })
+    //     .collect::<Vec<_>>());
 
     // dbg!(wlt_2
     //     .runtime()
