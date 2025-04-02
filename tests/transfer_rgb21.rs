@@ -1,13 +1,12 @@
 pub mod utils;
 
 use ifaces::{EmbeddedMedia, MediaType, ProofOfReserves};
-use utils::helpers::{attachment_from_fpath, nft_spec, FACIssueParams};
 
 use rstest_reuse::{self, *};
 use std::str::FromStr;
 use utils::{
     chain::initialize,
-    helpers::{get_wallet, AssetSchema},
+    helper::wallet::{get_wallet, AssetSchema},
     DescriptorType, *,
 };
 

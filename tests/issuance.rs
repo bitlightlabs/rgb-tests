@@ -2,13 +2,7 @@ pub mod utils;
 
 use ifaces::{EmbeddedMedia, MediaType, ProofOfReserves};
 use rstest_reuse::{self, *};
-use utils::{
-    chain::initialize,
-    helpers::{
-        attachment_from_fpath, get_wallet, nft_spec, FACIssueParams, FUAIssueParams, NIAIssueParams,
-    },
-    DescriptorType, *,
-};
+use utils::{chain::initialize, helper::wallet::get_wallet, DescriptorType, *};
 
 #[allow(dead_code)]
 const MEDIA_FPATH: &str = "tests/fixtures/rgb_logo.jpeg";

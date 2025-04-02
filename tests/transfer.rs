@@ -27,18 +27,18 @@ use rstest_reuse::{self, *};
 use serial_test::serial;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::str::FromStr;
-use utils::helpers::{CustomCoinselectStrategy, FUAIssueParams};
+use utils::helper::wallet::{
+    broadcast_tx_and_mine, get_mainnet_wallet, get_wallet, get_wallet_custom, AssetSchema,
+};
 use utils::{
     chain::{
         connect_reorg_nodes, disconnect_reorg_nodes, get_height, get_height_custom, initialize,
         mine_custom, stop_mining,
     },
-    helpers::{
-        broadcast_tx_and_mine, get_mainnet_wallet, get_wallet, get_wallet_custom, AssetSchema,
-        HistoryType, NIAIssueParams, ReorgType, TransferType,
-    },
     DescriptorType, INSTANCE_2, INSTANCE_3, *,
 };
+
+use crate::utils::helper::wallet::{HistoryType, ReorgType};
 
 type TT = TransferType;
 type DT = DescriptorType;
@@ -974,7 +974,7 @@ fn reorg_history(#[case] history_type: HistoryType, #[case] reorg_type: ReorgTyp
         HistoryType::Linear => {
             // Set the coin selection strategy to true small size
             // This setting is very important, it avoids selecting the output of the revert transaction as input
-            wlt_1.set_coinselect_strategy(helpers::CustomCoinselectStrategy::TrueSmallSize);
+            wlt_1.set_coinselect_strategy(CustomCoinselectStrategy::TrueSmallSize);
             let amt_0 = 590;
             // Create blinded invoice with specific UTXO
             let invoice = wlt_2.invoice(contract_id, amt_0, false, Some(0), Some(utxo_wlt_2_1));

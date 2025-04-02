@@ -1,243 +1,25 @@
-use bitcoin_hashes::{sha256, Hash};
-use indexmap::IndexMap;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::OnceLock;
-use std::time::Duration;
-use std::time::Instant;
-
-use bp::{seals::WTxoSeal, Outpoint};
-use commit_verify::{Digest, DigestExt, Sha256};
-use ifaces::{
-    AssetName, Attachment, Details, EmbeddedMedia, MediaType, NftSpec, ProofOfReserves, Ticker,
-    TokenIndex,
-};
-use psbt::TxParams;
-use rand::RngCore;
-use rgb::invoice::{RgbBeneficiary, RgbInvoice};
-use rgb::popls::bp::file::{BpDirMound, DirBarrow};
-use rgb::popls::bp::{Coinselect, OpRequestSet, WalletProvider};
-use rgb::{
-    Assignment, AuthToken, CellAddr, CodexId, Consensus, ContractId, ContractInfo, CreateParams,
-    EitherSeal, NamedState, RgbSealDef, StateAtom, StateCalc,
-};
-use rgbp::{descriptor::RgbDescr, RgbDirRuntime, RgbWallet};
-use rgbp::{CoinselectStrategy, PayError};
-use rgpsbt::ScriptResolver;
-use strict_types::value::{Blob, EnumTag, StrictNum};
-use strict_types::{FieldName, TypeName, VariantName};
-
-use crate::utils::chain::fund_wallet;
-
-use super::chain::is_tx_confirmed;
-use super::{
-    chain::{indexer_url, mine_custom, Indexer, INDEXER},
-    *,
-};
-
-use tabled::settings::{object::Columns, Alignment, Modify, Style};
-use tabled::{Table, Tabled};
-
-/// RGB Asset creation parameters builder
-#[derive(Clone)]
-pub struct AssetParamsBuilder {
-    params: CreateParams<Outpoint>,
-}
-
-impl AssetParamsBuilder {
-    /// Create a new builder instance for non-inflatable asset
-    pub fn default_nia() -> Self {
-        Self {
-            params: Self::from_file(NON_INFLATABLE_ASSET_TEMPLATE_PATH),
-        }
-    }
-
-    /// Create a new builder instance for fractional unique asset
-    pub fn default_fua() -> Self {
-        Self {
-            params: Self::from_file(FRACTIONAL_UNIQUE_ASSET_TEMPLATE_PATH),
-        }
-    }
-
-    /// Create a new builder instance for fractionable asset collection
-    pub fn default_fac() -> Self {
-        Self {
-            params: Self::from_file(FRACTIONABLE_ASSET_COLLECTION_TEMPLATE_PATH),
-        }
-    }
-
-    /// Load parameters from YAML file
-    pub fn from_file<P: AsRef<Path>>(path: P) -> CreateParams<Outpoint> {
-        let file = File::open(path).expect("Unable to open file");
-        let params: CreateParams<Outpoint> =
-            serde_yaml::from_reader::<_, CreateParams<Outpoint>>(file).expect("");
-        params
-    }
-
-    /// Set the contract template ID
-    pub fn codex_id(mut self, codex_id: CodexId) -> Self {
-        self.params.codex_id = codex_id;
-        self
-    }
-
-    /// Set the consensus type
-    pub fn consensus(mut self, consensus: Consensus) -> Self {
-        self.params.consensus = consensus;
-        self
-    }
-
-    /// Set whether it is a test network
-    pub fn testnet(mut self, testnet: bool) -> Self {
-        self.params.testnet = testnet;
-        self
-    }
-
-    /// Set the contract method name
-    pub fn method(mut self, method: &str) -> Self {
-        self.params.method = VariantName::from_str(method).unwrap();
-        self
-    }
-
-    /// Set the contract name
-    pub fn name(mut self, name: &str) -> Self {
-        self.params.name = TypeName::from_str(name).unwrap();
-        self
-    }
-
-    /// Update name state in global states
-    pub fn update_name_state(mut self, value: &str) -> Self {
-        if let Some(state) = self
-            .params
-            .global
-            .iter_mut()
-            .find(|s| s.name == "name".into())
-        {
-            state.state.verified = value.into();
-        }
-        self
-    }
-
-    /// Update details state in global states
-    pub fn update_details_state(mut self, value: &str) -> Self {
-        if let Some(state) = self
-            .params
-            .global
-            .iter_mut()
-            .find(|s| s.name == "details".into())
-        {
-            state.state.verified = StrictVal::Unit;
-            state.state.unverified = Some(value.into());
-        }
-        self
-    }
-
-    /// Update ticker state in global states
-    pub fn update_ticker_state(mut self, value: &str) -> Self {
-        if let Some(state) = self
-            .params
-            .global
-            .iter_mut()
-            .find(|s| s.name == "ticker".into())
-        {
-            state.state.verified = value.into();
-        }
-        self
-    }
-
-    /// Update precision state in global states
-    pub fn update_precision_state(mut self, value: &str) -> Self {
-        if let Some(state) = self
-            .params
-            .global
-            .iter_mut()
-            .find(|s| s.name == "precision".into())
-        {
-            state.state.verified = value.into();
-        }
-        self
-    }
-
-    /// Update circulating state in global states
-    /// circulating type is "RGBContract.Amount" eq u64 in rust
-    pub fn update_circulating_state(mut self, value: u64) -> Self {
-        if let Some(state) = self
-            .params
-            .global
-            .iter_mut()
-            .find(|s| s.name == "circulating".into())
-        {
-            state.state.verified = value.into();
-        }
-        self
-    }
-
-    /// Update owned state
-    pub fn update_owned_state(mut self, seal: Outpoint, val: u64) -> Self {
-        // check if owned state exists
-        if let Some(state) = self
-            .params
-            .owned
-            .iter_mut()
-            .find(|s| s.name == "owned".into())
-        {
-            // if exists, update seal and data
-            state.state.seal = EitherSeal::Alt(seal);
-            state.state.data = val.into();
-        } else {
-            // if not exists, create a new owned state
-            self.params.owned.push(NamedState {
-                name: "owned".into(),
-                state: Assignment {
-                    seal: EitherSeal::Alt(seal),
-                    data: val.into(),
-                },
-            });
-        }
-        self
-    }
-
-    pub fn clear_owned_state(mut self) -> Self {
-        self.params.owned.clear();
-        self
-    }
-
-    /// Add owned state
-    pub fn add_owned_state(mut self, seal: Outpoint, val: u64) -> Self {
-        self.params.owned.push(NamedState {
-            name: "amount".into(),
-            state: Assignment {
-                seal: EitherSeal::Alt(seal),
-                data: val.into(),
-            },
-        });
-        self
-    }
-
-    /// Build CreateParams instance
-    pub fn build(self) -> CreateParams<Outpoint> {
-        self.params
-    }
-}
-
-pub struct TestWallet {
-    runtime: RgbDirRuntime,
-    descriptor: RgbDescr,
-    signer: Option<TestnetSigner>,
-    wallet_dir: PathBuf,
-    instance: u8,
-    coinselect_strategy: CustomCoinselectStrategy,
-    /// Optional wallet identifier for reporting purposes
-    wallet_id: Option<String>,
-}
+use super::*;
 
 enum WalletAccount {
     Private(XprivAccount),
     Public(XpubAccount),
+}
+/// Test wallet structure type
+pub struct TestWallet {
+    /// RGB runtime for wallet operations
+    pub runtime: RgbDirRuntime,
+    /// RGB descriptor for wallet
+    pub descriptor: RgbDescr,
+    /// Signer for transaction signing
+    pub signer: Option<TestnetSigner>,
+    /// Wallet directory path
+    pub wallet_dir: PathBuf,
+    /// Bitcoin node instance number
+    pub instance: u8,
+    /// Custom coinselection strategy
+    pub coinselect_strategy: CustomCoinselectStrategy,
+    /// Optional wallet identifier for reporting purposes
+    pub wallet_id: Option<String>,
 }
 
 pub enum AllocationFilter {
@@ -336,561 +118,52 @@ impl fmt::Display for AssetSchema {
     }
 }
 
-/// Test metric type
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MetricType {
-    /// Duration (milliseconds)
-    Duration,
-    /// Bytes value
-    Bytes,
-    /// Integer value
-    Integer,
-    /// Float value
-    Float,
-    /// Text value
-    Text,
+/// Create a new wallet with the specified descriptor type
+pub fn get_wallet(descriptor_type: &DescriptorType) -> TestWallet {
+    get_wallet_custom(descriptor_type, INSTANCE_1)
 }
 
-/// Test metric definition
-#[derive(Debug, Clone)]
-pub struct MetricDefinition {
-    /// Metric name
-    pub name: String,
-    /// Metric type
-    pub metric_type: MetricType,
-    /// Metric description
-    pub description: String,
+/// Create a new wallet with the specified descriptor type and instance
+pub fn get_wallet_custom(descriptor_type: &DescriptorType, instance: u8) -> TestWallet {
+    let mut seed = vec![0u8; 128];
+    rand::thread_rng().fill_bytes(&mut seed);
+
+    let xpriv_account = XprivAccount::with_seed(true, &seed).derive(h![86, 1, 0]);
+
+    let fingerprint = xpriv_account.account_fp().to_string();
+    let wallet_dir = PathBuf::from(TEST_DATA_DIR)
+        .join(INTEGRATION_DATA_DIR)
+        .join(fingerprint);
+
+    _get_wallet(
+        descriptor_type,
+        Network::Regtest,
+        wallet_dir,
+        WalletAccount::Private(xpriv_account),
+        instance,
+    )
 }
 
-/// Test report structure
-pub struct Report {
-    /// Report file path
-    pub report_path: PathBuf,
-    /// Metric definitions
-    metrics: Vec<MetricDefinition>,
-    /// File handle
-    file: Option<File>,
-    /// Buffer for rows
-    buffer: Vec<String>,
-    /// Current row being built
-    current_row: HashMap<String, String>,
-    /// Buffer flush threshold
-    flush_threshold: usize,
+/// Create a wallet for mainnet (using predefined public keys)
+pub fn get_mainnet_wallet() -> TestWallet {
+    let xpub_account = XpubAccount::from_str(
+        "[c32338a7/86h/0h/0h]xpub6CmiK1xc7YwL472qm4zxeURFX8yMCSasioXujBjVMMzA3AKZr6KLQEmkzDge1Ezn2p43ZUysyx6gfajFVVnhtQ1AwbXEHrioLioXXgj2xW5"
+    ).unwrap();
+
+    let wallet_dir = PathBuf::from(TEST_DATA_DIR)
+        .join(INTEGRATION_DATA_DIR)
+        .join("mainnet");
+
+    _get_wallet(
+        &DescriptorType::Wpkh,
+        Network::Mainnet,
+        wallet_dir,
+        WalletAccount::Public(xpub_account),
+        INSTANCE_1,
+    )
 }
 
-/// Report error types
-#[derive(Debug)]
-pub enum ReportError {
-    /// IO error
-    Io(std::io::Error),
-    /// Format error
-    Format(String),
-    /// Metric error
-    Metric(String),
-}
-
-impl From<std::io::Error> for ReportError {
-    fn from(err: std::io::Error) -> Self {
-        ReportError::Io(err)
-    }
-}
-
-impl std::fmt::Display for ReportError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReportError::Io(err) => write!(f, "IO error: {}", err),
-            ReportError::Format(msg) => write!(f, "Format error: {}", msg),
-            ReportError::Metric(msg) => write!(f, "Metric error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for ReportError {}
-
-impl Report {
-    /// Create new report instance
-    pub fn new(
-        path: PathBuf,
-        metrics: Vec<MetricDefinition>,
-        flush_threshold: Option<usize>,
-    ) -> Result<Self, ReportError> {
-        let mut report = Self {
-            report_path: path,
-            metrics,
-            file: None,
-            buffer: Vec::new(),
-            current_row: HashMap::new(),
-            flush_threshold: flush_threshold.unwrap_or(10),
-        };
-
-        // Initialize report file
-        report.initialize()?;
-
-        Ok(report)
-    }
-
-    /// Initialize report file
-    fn initialize(&mut self) -> Result<(), ReportError> {
-        let headers: Vec<String> = self.metrics.iter().map(|m| m.name.clone()).collect();
-
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&self.report_path)?;
-
-        let mut file = file;
-        file.write_all(format!("{}\n", headers.join(";")).as_bytes())?;
-
-        // Save file handle for subsequent use
-        self.file = Some(file);
-
-        Ok(())
-    }
-
-    /// Get file handle
-    fn get_file(&mut self) -> Result<&mut File, ReportError> {
-        if self.file.is_none() {
-            let file = OpenOptions::new().append(true).open(&self.report_path)?;
-
-            self.file = Some(file);
-        }
-
-        Ok(self.file.as_mut().unwrap())
-    }
-
-    /// Add duration metric by name
-    pub fn add_duration(&mut self, name: &str, duration: Duration) -> Result<(), ReportError> {
-        self.check_metric_name_and_type(name, MetricType::Duration)?;
-        self.current_row
-            .insert(name.to_string(), duration.as_millis().to_string());
-        Ok(())
-    }
-
-    /// Add bytes metric by name
-    pub fn add_bytes(&mut self, name: &str, value: u64) -> Result<(), ReportError> {
-        self.check_metric_name_and_type(name, MetricType::Bytes)?;
-        self.current_row.insert(name.to_string(), value.to_string());
-        Ok(())
-    }
-
-    /// Add integer metric by name
-    pub fn add_integer(&mut self, name: &str, value: u64) -> Result<(), ReportError> {
-        self.check_metric_name_and_type(name, MetricType::Integer)?;
-        self.current_row.insert(name.to_string(), value.to_string());
-        Ok(())
-    }
-
-    /// Add float metric by name
-    pub fn add_float(&mut self, name: &str, value: f64) -> Result<(), ReportError> {
-        self.check_metric_name_and_type(name, MetricType::Float)?;
-        self.current_row.insert(name.to_string(), value.to_string());
-        Ok(())
-    }
-
-    /// Add text metric by name
-    pub fn add_text(&mut self, name: &str, value: &str) -> Result<(), ReportError> {
-        self.check_metric_name_and_type(name, MetricType::Text)?;
-        self.current_row.insert(name.to_string(), value.to_string());
-        Ok(())
-    }
-
-    /// Add arbitrary type metric by name (auto conversion)
-    pub fn add_value<T: ToString>(&mut self, name: &str, value: T) -> Result<(), ReportError> {
-        if !self.metrics.iter().any(|m| m.name == name) {
-            return Err(ReportError::Metric(format!(
-                "Metric name '{}' not found",
-                name
-            )));
-        }
-
-        self.current_row.insert(name.to_string(), value.to_string());
-        Ok(())
-    }
-
-    /// Helper method to check if metric name exists and has correct type
-    fn check_metric_name_and_type(
-        &self,
-        name: &str,
-        expected_type: MetricType,
-    ) -> Result<(), ReportError> {
-        let metric = self.metrics.iter().find(|m| m.name == name);
-
-        match metric {
-            Some(m) if m.metric_type == expected_type => Ok(()),
-            Some(m) => Err(ReportError::Metric(format!(
-                "Metric '{}' type mismatch, expected {:?}, actual {:?}",
-                name, expected_type, m.metric_type
-            ))),
-            None => Err(ReportError::Metric(format!(
-                "Metric name '{}' not found",
-                name
-            ))),
-        }
-    }
-
-    /// Complete current row and add to buffer
-    pub fn end_row(&mut self) -> Result<(), ReportError> {
-        // Ensure all metrics have values
-        for metric in &self.metrics {
-            if !self.current_row.contains_key(&metric.name) {
-                self.current_row.insert(metric.name.clone(), String::new());
-            }
-        }
-
-        // Create row in the same order as metrics
-        let row = self
-            .metrics
-            .iter()
-            .map(|m| self.current_row.get(&m.name).cloned().unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join(";");
-
-        self.buffer.push(row);
-
-        // Clear current row for next use
-        self.current_row.clear();
-
-        // If buffer reaches threshold, flush to file
-        if self.buffer.len() >= self.flush_threshold {
-            self.flush_buffer()?;
-        }
-
-        Ok(())
-    }
-
-    /// Write buffer content to file
-    pub fn flush_buffer(&mut self) -> Result<(), ReportError> {
-        if self.buffer.is_empty() {
-            return Ok(());
-        }
-
-        // Clone buffer contents to avoid borrow conflict
-        let buffer_contents = self.buffer.clone();
-        let file = self.get_file()?;
-
-        for row in buffer_contents.iter() {
-            file.write_all(format!("{}\n", row).as_bytes())?;
-        }
-
-        self.buffer.clear();
-
-        Ok(())
-    }
-
-    /// Generate summary statistics
-    pub fn generate_summary(&mut self) -> Result<String, ReportError> {
-        // Ensure all data is written to file
-        self.flush_buffer()?;
-
-        // Read CSV file
-        let content = std::fs::read_to_string(&self.report_path)?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        if lines.is_empty() {
-            return Err(ReportError::Format("CSV file is empty".to_string()));
-        }
-
-        // Parse headers
-        let headers: Vec<&str> = lines[0].split(';').collect();
-
-        // Prepare data structure
-        let mut data: Vec<Vec<f64>> = vec![Vec::new(); headers.len()];
-
-        // Parse data rows
-        for line in lines.iter().skip(1) {
-            let values: Vec<&str> = line.split(';').collect();
-            for (i, value) in values.iter().enumerate() {
-                if i >= headers.len() {
-                    break;
-                }
-
-                if let Ok(num) = value.parse::<f64>() {
-                    data[i].push(num);
-                }
-            }
-        }
-
-        #[derive(Tabled)]
-        struct MetricSummary {
-            #[tabled(rename = "Metric")]
-            metric: String,
-            #[tabled(rename = "Average")]
-            average: String,
-            #[tabled(rename = "Minimum")]
-            minimum: String,
-            #[tabled(rename = "Maximum")]
-            maximum: String,
-            #[tabled(rename = "Sample Count")]
-            count: String,
-        }
-
-        let mut summaries = Vec::new();
-
-        for (i, header) in headers.iter().enumerate() {
-            if data[i].is_empty() {
-                continue;
-            }
-
-            let values = &data[i];
-            let avg = values.iter().sum::<f64>() / values.len() as f64;
-            let min = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            let max = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-
-            // Format output based on metric type
-            let metric_type = if i < self.metrics.len() {
-                self.metrics[i].metric_type
-            } else {
-                MetricType::Float
-            };
-
-            let (avg_str, min_str, max_str) = match metric_type {
-                MetricType::Duration => (
-                    format!("{:.2} ms", avg),
-                    format!("{:.2} ms", min),
-                    format!("{:.2} ms", max),
-                ),
-                MetricType::Bytes => (
-                    format!("{:.2} B", avg),
-                    format!("{:.2} B", min),
-                    format!("{:.2} B", max),
-                ),
-                MetricType::Integer | MetricType::Float => (
-                    format!("{:.2}", avg),
-                    format!("{:.2}", min),
-                    format!("{:.2}", max),
-                ),
-                MetricType::Text => ("-".to_string(), "-".to_string(), "-".to_string()),
-            };
-
-            summaries.push(MetricSummary {
-                metric: header.to_string(),
-                average: avg_str,
-                minimum: min_str,
-                maximum: max_str,
-                count: values.len().to_string(),
-            });
-        }
-
-        // Create the table and style it
-        let mut table = Table::new(summaries);
-        table
-            .with(Style::markdown())
-            .with(Modify::new(Columns::new(1..)).with(Alignment::right()));
-
-        // Generate the final Markdown output
-        let mut summary = String::new();
-        summary.push_str("# Performance Test Summary\n\n");
-        summary.push_str(&table.to_string());
-
-        Ok(summary)
-    }
-
-    /// Save summary statistics to file
-    pub fn save_summary(&mut self, name: &str) -> Result<PathBuf, ReportError> {
-        let summary = self.generate_summary()?;
-
-        let summary_path = self
-            .report_path
-            .clone()
-            .with_file_name(format!("{}.md", name));
-
-        let mut file = std::fs::File::create(&summary_path)?;
-        file.write_all(summary.as_bytes())?;
-
-        Ok(summary_path)
-    }
-
-    /// Generate chart data
-    pub fn generate_chart_data(&mut self) -> Result<PathBuf, ReportError> {
-        // Ensure all data is written to file
-        self.flush_buffer()?;
-
-        // Read CSV file
-        let content = std::fs::read_to_string(&self.report_path)?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        if lines.is_empty() {
-            return Err(ReportError::Format("CSV file is empty".to_string()));
-        }
-
-        // Parse headers
-        let headers: Vec<&str> = lines[0].split(';').collect();
-
-        // Prepare data structure
-        let mut data: Vec<Vec<f64>> = vec![Vec::new(); headers.len()];
-
-        // Parse data rows
-        for line in lines.iter().skip(1) {
-            let values: Vec<&str> = line.split(';').collect();
-            for (i, value) in values.iter().enumerate() {
-                if i >= headers.len() {
-                    break;
-                }
-
-                if let Ok(num) = value.parse::<f64>() {
-                    data[i].push(num);
-                }
-            }
-        }
-
-        // Generate JSON
-        let mut json = String::from("{\n");
-
-        for (i, header) in headers.iter().enumerate() {
-            if i > 0 {
-                json.push_str(",\n");
-            }
-
-            json.push_str(&format!("  \"{}\": [", header));
-
-            for (j, value) in data[i].iter().enumerate() {
-                if j > 0 {
-                    json.push_str(", ");
-                }
-                json.push_str(&format!("{}", value));
-            }
-
-            json.push(']');
-        }
-
-        json.push_str("\n}");
-
-        // Save JSON
-        let mut chart_path = self.report_path.clone();
-        chart_path.set_extension("json");
-
-        let mut file = std::fs::File::create(&chart_path)?;
-        file.write_all(json.as_bytes())?;
-
-        Ok(chart_path)
-    }
-
-    /// Ensure all data is written on drop
-    pub fn finalize(&mut self) -> Result<(), ReportError> {
-        self.flush_buffer()
-    }
-
-    /// For backward compatibility
-    pub fn write_header(&self, _fields: &[&str]) {
-        // Do nothing, headers are now defined by metrics
-    }
-
-    /// For backward compatibility
-    pub fn write_duration(&self, _duration: Duration) {
-        // Do nothing, use add_duration instead
-    }
-
-    /// For backward compatibility
-    pub fn write_value<T: ToString>(&self, _value: T) {
-        // Do nothing, use add_value instead
-    }
-
-    /// For backward compatibility
-    pub fn end_line(&self) {
-        // Do nothing, use end_row instead
-    }
-}
-
-impl Drop for Report {
-    fn drop(&mut self) {
-        // Try to flush buffer, ignore errors
-        let _ = self.flush_buffer();
-    }
-}
-
-/// Custom RGB coinselection strategy for more precise control over UTXO selection
-///
-/// # Usage Example
-///
-/// ```
-/// // Create wallet
-/// let mut wallet = get_wallet(&DescriptorType::Wpkh);
-///
-/// // Set to true small size strategy (selects UTXOs with maximum values)
-/// wallet.set_coinselect_strategy(CustomCoinselectStrategy::TrueSmallSize);
-///
-/// // Or use standard strategies
-/// wallet.set_coinselect_strategy(CustomCoinselectStrategy::Standard(CoinselectStrategy::Aggregate));
-/// wallet.set_coinselect_strategy(CustomCoinselectStrategy::Standard(CoinselectStrategy::SmallSize));
-///
-/// // For transfers requiring specific UTXOs (like testing reorganization history), use:
-/// let (consignment, tx) = wallet.transfer_with_specific_utxo(invoice, specific_utxo, sats, fee, broadcast, report);
-/// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum CustomCoinselectStrategy {
-    /// Use standard RGB coinselection strategies
-    /// - Aggregate: Collects many small outputs until target amount is reached
-    /// - SmallSize: Collects minimum number of outputs but without proper value sorting
-    Standard(CoinselectStrategy),
-
-    /// Enhanced coinselection strategy that truly minimizes transaction size
-    /// by selecting the minimum number of UTXOs with largest asset values.
-    /// This strategy:
-    /// 1. First sorts all available colored UTXOs by their asset amount
-    /// 2. Selects the minimum number of largest-value UTXOs needed to satisfy the transfer
-    /// 3. Results in smallest possible transaction size by using fewer inputs
-    TrueSmallSize,
-}
-
-impl Default for CustomCoinselectStrategy {
-    fn default() -> Self {
-        Self::Standard(CoinselectStrategy::default())
-    }
-}
-
-/// Implementation of the Coinselect trait for our custom strategy
-impl Coinselect for CustomCoinselectStrategy {
-    fn coinselect(
-        &mut self,
-        invoiced_state: &StrictVal,
-        calc: &mut (impl StateCalc + ?Sized),
-        // Sorted vector by values
-        owned_state: Vec<(CellAddr, &StrictVal)>,
-    ) -> Option<Vec<CellAddr>> {
-        match self {
-            // For standard strategies, delegate to the original implementation
-            CustomCoinselectStrategy::Standard(strategy) => {
-                strategy.coinselect(invoiced_state, calc, owned_state)
-            }
-
-            // True small size implementation - sort by value before selection
-            CustomCoinselectStrategy::TrueSmallSize => {
-                // Clone the state to allow sorting (we need to own the data)
-                let mut value_sorted_state: Vec<(CellAddr, &StrictVal, u64)> = owned_state
-                    .iter()
-                    .filter_map(|(addr, val)| {
-                        // Extract numeric value (assuming we're dealing with u64 values)
-                        let amount: u64 = val.unwrap_num().unwrap_uint();
-                        Some((*addr, *val, amount))
-                    })
-                    .collect();
-
-                // Sort by value in descending order (largest first)
-                value_sorted_state.sort_by(|a, b| b.2.cmp(&a.2));
-
-                // Now use the sorted state for iteration
-                let res = value_sorted_state
-                    .into_iter()
-                    .take_while(|(_, val, _)| {
-                        if calc.is_satisfied(invoiced_state) {
-                            return false;
-                        }
-                        calc.accumulate(val).is_ok()
-                    })
-                    .map(|(addr, _, _)| addr)
-                    .collect();
-
-                if !calc.is_satisfied(invoiced_state) {
-                    return None;
-                };
-
-                Some(res)
-            }
-        }
-    }
-}
-
+/// Internal wallet creation function
 fn _get_wallet(
     descriptor_type: &DescriptorType,
     network: Network,
@@ -957,6 +230,7 @@ fn _get_wallet(
     test_wallet
 }
 
+/// Create a runtime for the wallet
 fn make_runtime(descriptor: &RgbDescr, network: Network, wallet_dir: &PathBuf) -> RgbDirRuntime {
     let name = "bp_wallet.wallet";
     let provider = FsTextStore::new(wallet_dir.join(name)).unwrap();
@@ -967,48 +241,7 @@ fn make_runtime(descriptor: &RgbDescr, network: Network, wallet_dir: &PathBuf) -
     RgbDirRuntime::from(DirBarrow::with(wallet, mound))
 }
 
-pub fn get_wallet(descriptor_type: &DescriptorType) -> TestWallet {
-    get_wallet_custom(descriptor_type, INSTANCE_1)
-}
-
-pub fn get_wallet_custom(descriptor_type: &DescriptorType, instance: u8) -> TestWallet {
-    let mut seed = vec![0u8; 128];
-    rand::thread_rng().fill_bytes(&mut seed);
-
-    let xpriv_account = XprivAccount::with_seed(true, &seed).derive(h![86, 1, 0]);
-
-    let fingerprint = xpriv_account.account_fp().to_string();
-    let wallet_dir = PathBuf::from(TEST_DATA_DIR)
-        .join(INTEGRATION_DATA_DIR)
-        .join(fingerprint);
-
-    _get_wallet(
-        descriptor_type,
-        Network::Regtest,
-        wallet_dir,
-        WalletAccount::Private(xpriv_account),
-        instance,
-    )
-}
-
-pub fn get_mainnet_wallet() -> TestWallet {
-    let xpub_account = XpubAccount::from_str(
-        "[c32338a7/86h/0h/0h]xpub6CmiK1xc7YwL472qm4zxeURFX8yMCSasioXujBjVMMzA3AKZr6KLQEmkzDge1Ezn2p43ZUysyx6gfajFVVnhtQ1AwbXEHrioLioXXgj2xW5"
-    ).unwrap();
-
-    let wallet_dir = PathBuf::from(TEST_DATA_DIR)
-        .join(INTEGRATION_DATA_DIR)
-        .join("mainnet");
-
-    _get_wallet(
-        &DescriptorType::Wpkh,
-        Network::Mainnet,
-        wallet_dir,
-        WalletAccount::Public(xpub_account),
-        INSTANCE_1,
-    )
-}
-
+/// Get an indexer instance
 fn get_indexer(indexer_url: &str) -> AnyIndexer {
     match INDEXER.get().unwrap() {
         Indexer::Electrum => {
@@ -1020,6 +253,7 @@ fn get_indexer(indexer_url: &str) -> AnyIndexer {
     }
 }
 
+/// Broadcast a transaction
 fn broadcast_tx(tx: &Tx, indexer_url: &str) {
     match get_indexer(indexer_url) {
         AnyIndexer::Electrum(inner) => {
@@ -1040,6 +274,7 @@ fn broadcast_tx(tx: &Tx, indexer_url: &str) {
     }
 }
 
+/// Broadcast a transaction and mine a block
 pub fn broadcast_tx_and_mine(tx: &Tx, instance: u8) {
     broadcast_tx(tx, &indexer_url(instance, Network::Regtest));
     mine_custom(false, instance, 1);
@@ -1101,6 +336,40 @@ impl TestWallet {
     // Because it is not implemented at the moment, only sync is included for now
     pub fn sync_and_rollback_state(&mut self) {
         self.sync();
+    }
+
+    pub fn issue_nia_with_params(&mut self, params: NIAIssueParams) -> ContractId {
+        let mut builder: AssetParamsBuilder = AssetParamsBuilder::default_nia()
+            .name(params.name.as_str())
+            .update_name_state(params.name.as_str())
+            .update_ticker_state(params.ticker.as_str())
+            .update_precision_state(params.precision.as_str())
+            .update_circulating_state(params.circulating_supply)
+            .clear_owned_state();
+
+        for (outpoint, amount) in params.initial_allocations {
+            builder = builder.add_owned_state(outpoint, amount);
+        }
+
+        self.issue_with_params(builder.build())
+    }
+
+    /// Issue a FUA contract with custom parameters
+    pub fn issue_fua_with_params(&mut self, params: FUAIssueParams) -> ContractId {
+        let mut builder = AssetParamsBuilder::default_fua()
+            .name(params.name.as_str())
+            .update_name_state(params.name.as_str())
+            .update_details_state(params.details.as_str())
+            .update_precision_state(params.precision.as_str())
+            .update_circulating_state(params.circulating_supply)
+            .clear_owned_state();
+
+        // Add initial allocations
+        for (outpoint, amount) in params.initial_allocations {
+            builder = builder.add_owned_state(outpoint, amount);
+        }
+
+        self.issue_with_params(dbg!(builder.build()))
     }
 
     pub fn switch_to_instance(&mut self, instance: u8) {
@@ -1180,6 +449,33 @@ impl TestWallet {
         }
     }
 
+    /// Generates a noise engine for seal randomization
+    /// This is a clone of the internal noise_engine implementation from rgb-std,
+    /// since the original is not public and we need it for custom UTXO selection
+    fn noise_engine(&self) -> Sha256 {
+        let noise_seed = self.runtime.wallet.noise_seed();
+        let mut noise_engine = Sha256::new();
+        noise_engine.input_raw(noise_seed.as_ref());
+        noise_engine
+    }
+
+    /// Creates an auth token for a specific UTXO
+    ///
+    /// This is a custom implementation that allows specifying the UTXO to use,
+    /// unlike the standard rgb-std auth_token which automatically selects a UTXO.
+    /// We need this to support custom UTXO selection for auth tokens.
+    pub fn create_auth_token_with_utxo(
+        &mut self,
+        nonce: Option<u64>,
+        outpoint: Outpoint,
+    ) -> Option<AuthToken> {
+        let nonce = nonce.unwrap_or_else(|| self.runtime.wallet.next_nonce());
+        let seal = WTxoSeal::no_fallback(outpoint, self.noise_engine(), nonce);
+        let auth = seal.auth_token();
+        self.runtime.wallet.register_seal(seal);
+        Some(auth)
+    }
+
     /// Creates an RGB invoice with either a witness output or auth token beneficiary
     ///
     /// # Arguments
@@ -1213,31 +509,69 @@ impl TestWallet {
         RgbInvoice::new(contract_id, beneficiary, Some(value))
     }
 
-    /// Generates a noise engine for seal randomization
-    /// This is a clone of the internal noise_engine implementation from rgb-std,
-    /// since the original is not public and we need it for custom UTXO selection
-    fn noise_engine(&self) -> Sha256 {
-        let noise_seed = self.runtime.wallet.noise_seed();
-        let mut noise_engine = Sha256::new();
-        noise_engine.input_raw(noise_seed.as_ref());
-        noise_engine
+    /// Set the coin selection strategy
+    pub fn set_coinselect_strategy(&mut self, strategy: CustomCoinselectStrategy) -> &mut Self {
+        self.coinselect_strategy = strategy;
+        self
     }
 
-    /// Creates an auth token for a specific UTXO
-    ///
-    /// This is a custom implementation that allows specifying the UTXO to use,
-    /// unlike the standard rgb-std auth_token which automatically selects a UTXO.
-    /// We need this to support custom UTXO selection for auth tokens.
-    pub fn create_auth_token_with_utxo(
+    /// Get the current coin selection strategy
+    pub fn coinselect_strategy(&self) -> CustomCoinselectStrategy {
+        self.coinselect_strategy
+    }
+
+    /// Set wallet identifier for reporting purposes
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.wallet_id = Some(id.into());
+        self
+    }
+
+    /// Get wallet identifier, or a default if not set
+    pub fn wallet_id(&self) -> String {
+        self.wallet_id
+            .clone()
+            .unwrap_or_else(|| format!("wallet_{}", self.instance))
+    }
+
+    pub fn sign_finalize(&self, psbt: &mut Psbt) {
+        let _sig_count = psbt.sign(self.signer.as_ref().unwrap()).unwrap();
+        psbt.finalize(self.runtime.wallet.descriptor());
+    }
+
+    pub fn sign_finalize_extract(&self, psbt: &mut Psbt) -> Tx {
+        self.sign_finalize(psbt);
+        psbt.extract().unwrap()
+    }
+
+    pub fn check_allocations(
         &mut self,
-        nonce: Option<u64>,
-        outpoint: Outpoint,
-    ) -> Option<AuthToken> {
-        let nonce = nonce.unwrap_or_else(|| self.runtime.wallet.next_nonce());
-        let seal = WTxoSeal::no_fallback(outpoint, self.noise_engine(), nonce);
-        let auth = seal.auth_token();
-        self.runtime.wallet.register_seal(seal);
-        Some(auth)
+        contract_id: ContractId,
+        asset_schema: AssetSchema,
+        mut expected_fungible_allocations: Vec<u64>,
+    ) {
+        let allocation_field = match asset_schema {
+            AssetSchema::RGB20 | AssetSchema::RGB25 => {
+                // For fungible assets, we need to check the "amount" allocation
+                "amount"
+            }
+            AssetSchema::RGB21 => {
+                // for RGB21, we need to check the "fractions" allocation
+                "fractions"
+            }
+        };
+
+        let state = self.runtime.state_own(Some(contract_id)).next().unwrap().1;
+
+        let mut actual_fungible_allocations = state
+            .owned
+            .get(allocation_field)
+            .unwrap()
+            .iter()
+            .map(|(_, assignment)| assignment.data.unwrap_num().unwrap_uint::<u64>())
+            .collect::<Vec<_>>();
+        actual_fungible_allocations.sort();
+        expected_fungible_allocations.sort();
+        assert_eq!(actual_fungible_allocations, expected_fungible_allocations);
     }
 
     pub fn send(
@@ -1388,179 +722,9 @@ impl TestWallet {
         }
         Ok(())
     }
-
-    pub fn check_allocations(
-        &mut self,
-        contract_id: ContractId,
-        asset_schema: AssetSchema,
-        mut expected_fungible_allocations: Vec<u64>,
-    ) {
-        let allocation_field = match asset_schema {
-            AssetSchema::RGB20 | AssetSchema::RGB25 => {
-                // For fungible assets, we need to check the "amount" allocation
-                "amount"
-            }
-            AssetSchema::RGB21 => {
-                // for RGB21, we need to check the "fractions" allocation
-                "fractions"
-            }
-        };
-
-        let state = self.runtime.state_own(Some(contract_id)).next().unwrap().1;
-
-        let mut actual_fungible_allocations = state
-            .owned
-            .get(allocation_field)
-            .unwrap()
-            .iter()
-            .map(|(_, assignment)| assignment.data.unwrap_num().unwrap_uint::<u64>())
-            .collect::<Vec<_>>();
-        actual_fungible_allocations.sort();
-        expected_fungible_allocations.sort();
-        assert_eq!(actual_fungible_allocations, expected_fungible_allocations);
-    }
-
-    pub fn sign_finalize(&self, psbt: &mut Psbt) {
-        let _sig_count = psbt.sign(self.signer.as_ref().unwrap()).unwrap();
-        psbt.finalize(self.runtime.wallet.descriptor());
-    }
-
-    pub fn sign_finalize_extract(&self, psbt: &mut Psbt) -> Tx {
-        self.sign_finalize(psbt);
-        psbt.extract().unwrap()
-    }
-
-    /// Set the coin selection strategy
-    pub fn set_coinselect_strategy(&mut self, strategy: CustomCoinselectStrategy) -> &mut Self {
-        self.coinselect_strategy = strategy;
-        self
-    }
-
-    /// Get the current coin selection strategy
-    pub fn coinselect_strategy(&self) -> CustomCoinselectStrategy {
-        self.coinselect_strategy
-    }
-
-    /// Set wallet identifier for reporting purposes
-    pub fn with_id(mut self, id: impl Into<String>) -> Self {
-        self.wallet_id = Some(id.into());
-        self
-    }
-
-    /// Get wallet identifier, or a default if not set
-    pub fn wallet_id(&self) -> String {
-        self.wallet_id
-            .clone()
-            .unwrap_or_else(|| format!("wallet_{}", self.instance))
-    }
-}
-
-/// Parameters for NIA (Non-Inflatable Asset) issuance
-#[derive(Clone)]
-pub struct NIAIssueParams {
-    pub name: String,
-    pub ticker: String,
-    pub precision: String,
-    pub circulating_supply: u64,
-    pub initial_allocations: Vec<(Outpoint, u64)>,
-}
-
-impl Default for NIAIssueParams {
-    fn default() -> Self {
-        Self {
-            name: "USD Tether".to_string(),
-            ticker: "USDT".to_string(),
-            precision: "centiMilli".to_string(),
-            circulating_supply: 1_000_000,
-            initial_allocations: vec![],
-        }
-    }
-}
-
-impl NIAIssueParams {
-    pub fn new(
-        name: impl Into<String>,
-        ticker: impl Into<String>,
-        precision: impl Into<String>,
-        circulating_supply: u64,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            ticker: ticker.into(),
-            precision: precision.into(),
-            circulating_supply,
-            initial_allocations: vec![],
-        }
-    }
-
-    pub fn add_allocation(&mut self, outpoint: Outpoint, amount: u64) -> &mut Self {
-        self.initial_allocations.push((outpoint, amount));
-        self
-    }
-}
-
-/// RGB Contract State representation
-#[derive(Debug)]
-pub struct ContractState {
-    /// Immutable state of the contract
-    pub immutable: ContractImmutableState,
-    /// Ownership state of the contract
-    pub owned: ContractOwnedState,
-}
-
-/// Contract's immutable state
-#[derive(Debug)]
-pub struct ContractImmutableState {
-    pub name: String,
-    pub ticker: String,
-    pub precision: String,
-    pub circulating_supply: u64,
-}
-
-/// Contract's ownership state
-#[derive(Debug)]
-pub struct ContractOwnedState {
-    pub allocations: Vec<(Outpoint, u64)>,
 }
 
 impl TestWallet {
-    pub fn issue_nia_with_params(&mut self, params: NIAIssueParams) -> ContractId {
-        let mut builder: AssetParamsBuilder = AssetParamsBuilder::default_nia()
-            .name(params.name.as_str())
-            .update_name_state(params.name.as_str())
-            .update_ticker_state(params.ticker.as_str())
-            .update_precision_state(params.precision.as_str())
-            .update_circulating_state(params.circulating_supply)
-            .clear_owned_state();
-
-        for (outpoint, amount) in params.initial_allocations {
-            builder = builder.add_owned_state(outpoint, amount);
-        }
-
-        self.issue_with_params(builder.build())
-    }
-
-    /// Get contract state (internal implementation)
-    fn contract_state_internal(
-        &mut self,
-        contract_id: ContractId,
-    ) -> Option<(
-        BTreeMap<VariantName, BTreeMap<CellAddr, StateAtom>>,
-        BTreeMap<VariantName, BTreeMap<CellAddr, Assignment<Outpoint>>>,
-        BTreeMap<VariantName, StrictVal>,
-    )> {
-        self.runtime()
-            .state_all(Some(contract_id))
-            .next()
-            .map(|(_, state)| {
-                (
-                    state.immutable.clone(),
-                    state.owned.clone(),
-                    state.computed.clone(),
-                )
-            })
-    }
-
     /// Get contract state with parsed data structures
     pub fn contract_state(&mut self, contract_id: ContractId) -> Option<ContractState> {
         self.contract_state_internal(contract_id)
@@ -1622,177 +786,143 @@ impl TestWallet {
                 }
             })
     }
+    /// Get contract state (internal implementation)
+    fn contract_state_internal(
+        &mut self,
+        contract_id: ContractId,
+    ) -> Option<(
+        BTreeMap<VariantName, BTreeMap<CellAddr, StateAtom>>,
+        BTreeMap<VariantName, BTreeMap<CellAddr, Assignment<Outpoint>>>,
+        BTreeMap<VariantName, StrictVal>,
+    )> {
+        self.runtime()
+            .state_all(Some(contract_id))
+            .next()
+            .map(|(_, state)| {
+                (
+                    state.immutable.clone(),
+                    state.owned.clone(),
+                    state.computed.clone(),
+                )
+            })
+    }
 }
 
-/// Parameters for FUA (Fractional unique asset) issuance
-#[derive(Clone)]
-pub struct FUAIssueParams {
-    /// Asset name
+/// Immutable state part of RGB21 contract
+#[derive(Debug, Clone)]
+pub struct RGB21ContractImmutableState {
     pub name: String,
-    /// Asset details
-    pub details: String,
-    /// Decimal precision for the asset
-    pub precision: String,
-    /// Total circulating supply
-    pub circulating_supply: u64,
-    /// Initial token allocations (outpoint, amount)
-    pub initial_allocations: Vec<(Outpoint, u64)>,
-}
-
-impl Default for FUAIssueParams {
-    fn default() -> Self {
-        Self {
-            name: "DemoFUA".to_string(),
-            details: "Demo FUA details".to_string(),
-            precision: "centiMilli".to_string(),
-            circulating_supply: 10_000,
-            initial_allocations: vec![],
-        }
-    }
-}
-
-impl FUAIssueParams {
-    /// Create new CFA issuance parameters
-    pub fn new(
-        name: impl Into<String>,
-        details: impl Into<String>,
-        precision: impl Into<String>,
-        circulating_supply: u64,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            details: details.into(),
-            precision: precision.into(),
-            circulating_supply,
-            initial_allocations: vec![],
-        }
-    }
-
-    /// Add a token allocation
-    pub fn add_allocation(&mut self, outpoint: Outpoint, amount: u64) -> &mut Self {
-        self.initial_allocations.push((outpoint, amount));
-        self
-    }
-}
-
-impl TestWallet {
-    /// Issue a FUA contract with custom parameters
-    pub fn issue_fua_with_params(&mut self, params: FUAIssueParams) -> ContractId {
-        let mut builder = AssetParamsBuilder::default_fua()
-            .name(params.name.as_str())
-            .update_name_state(params.name.as_str())
-            .update_details_state(params.details.as_str())
-            .update_precision_state(params.precision.as_str())
-            .update_circulating_state(params.circulating_supply)
-            .clear_owned_state();
-
-        // Add initial allocations
-        for (outpoint, amount) in params.initial_allocations {
-            builder = builder.add_owned_state(outpoint, amount);
-        }
-
-        self.issue_with_params(dbg!(builder.build()))
-    }
-}
-
-/// Parameters for FAC (Fractionable Asset Collection) issuance
-#[derive(Clone)]
-pub struct FACIssueParams {
-    /// Collection name
-    pub name: String,
-    /// Collection details
-    pub details: String,
-    /// Total number of fractions
     pub total_fractions: u64,
-    /// Token index
+    pub token: Option<NFTMetadata>,
+}
+
+/// NFT metadata in RGB21 contract
+#[derive(Debug, Clone)]
+pub struct NFTMetadata {
     pub index: u32,
-    /// Initial token allocation (outpoint, amount)
-    pub initial_allocation: Option<(Outpoint, u64)>,
-    /// NFT specification
-    pub nft_spec: Option<NftSpec>,
+    pub amount: u64,
+    pub ticker: Option<String>,
+    pub name: Option<String>,
+    pub details: Option<String>,
+    pub preview: Option<MediaData>,
+    pub media: Option<MediaDigest>,
+    pub attachments: BTreeMap<u8, MediaDigest>,
+    pub reserves: Option<ReserveData>,
 }
 
-impl Default for FACIssueParams {
-    fn default() -> Self {
-        Self {
-            name: "FAC".to_string(),
-            details: "Demo FAC details".to_string(),
-            total_fractions: 10_000,
-            index: UDA_FIXED_INDEX,
-            initial_allocation: None,
-            nft_spec: None,
+/// Media data with full content
+#[derive(Debug, Clone)]
+pub struct MediaData {
+    pub media_type: MediaTypeData,
+    pub data: Vec<u8>,
+}
+
+/// Media type information
+#[derive(Debug, Clone)]
+pub struct MediaTypeData {
+    pub r#type: String,
+    pub subtype: Option<String>,
+    pub charset: Option<String>,
+}
+
+/// Media digest (reference only)
+#[derive(Debug, Clone)]
+pub struct MediaDigest {
+    pub media_type: MediaTypeData,
+    pub digest: Vec<u8>,
+}
+
+/// Reserve proof data
+#[derive(Debug, Clone)]
+pub struct ReserveData {
+    pub utxo: Outpoint,
+    pub proof: Vec<u8>,
+}
+
+/// Owned state part of RGB21 contract
+#[derive(Debug, Clone)]
+pub struct RGB21ContractOwnedState {
+    pub fractions: Vec<(Outpoint, u64)>, // (outpoint, amount)
+}
+
+/// Complete RGB21 contract state
+#[derive(Debug, Clone)]
+pub struct RGB21ContractState {
+    pub immutable: RGB21ContractImmutableState,
+    pub owned: RGB21ContractOwnedState,
+}
+
+/// Extract the first element from a tuple
+fn extract_from_tuple(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Tuple(s) = v {
+        if !s.is_empty() {
+            Some(s[0].clone())
+        } else {
+            None
         }
+    } else {
+        None
     }
 }
 
-impl FACIssueParams {
-    /// Create new FAC issuance parameters
-    pub fn new(name: impl Into<String>, details: impl Into<String>, total_fractions: u64) -> Self {
-        Self {
-            name: name.into(),
-            details: details.into(),
-            index: UDA_FIXED_INDEX,
-            total_fractions,
-            initial_allocation: None,
-            nft_spec: None,
+/// Extract the first element from a two-layer tuple
+fn extract_from_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Tuple(t) = v {
+        if let Some(inner) = t.get(0) {
+            extract_from_tuple(inner)
+        } else {
+            None
         }
-    }
-
-    /// Set token allocation
-    pub fn with_allocation(&mut self, outpoint: Outpoint, amount: u64) -> &mut Self {
-        self.initial_allocation = Some((outpoint, amount));
-        self
-    }
-
-    /// Set NFT specification
-    pub fn with_nft_spec(&mut self, nft_spec: NftSpec) -> &mut Self {
-        self.nft_spec = Some(nft_spec);
-        self
+    } else {
+        None
     }
 }
 
-fn nft_spec_minimal() -> NftSpec {
-    NftSpec {
-        index: TokenIndex::from(UDA_FIXED_INDEX),
-        ..Default::default()
+/// Extract value from Union (for Option type)
+fn extract_from_union(v: &StrictVal) -> Option<StrictVal> {
+    if let StrictVal::Union(tag, t) = v {
+        if let EnumTag::Name(name) = tag {
+            if ***name == "some" {
+                Some(t.as_ref().clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }
 
-pub fn nft_spec(
-    ticker: &str,
-    name: &str,
-    details: &str,
-    preview: EmbeddedMedia,
-    media: Attachment,
-    attachments: BTreeMap<u8, Attachment>,
-    reserves: ProofOfReserves,
-) -> NftSpec {
-    let mut nft_spec = nft_spec_minimal();
-    nft_spec.preview = Some(preview);
-    nft_spec.media = Some(media);
-    nft_spec.attachments = Confined::try_from(attachments.clone()).unwrap();
-    nft_spec.reserves = Some(reserves);
-    nft_spec.ticker = Some(Ticker::try_from(ticker.to_string()).unwrap());
-    nft_spec.name = Some(AssetName::try_from(name.to_string()).unwrap());
-    nft_spec.details = Some(Details::from_str(details).unwrap());
-    nft_spec
+/// Extract value from Union and single-layer Tuple
+fn extract_from_union_and_tuple(v: &StrictVal) -> Option<StrictVal> {
+    extract_from_union(v).and_then(|s| extract_from_tuple(&s))
 }
 
-// Function to create a file attachment from a file path
-pub fn attachment_from_fpath(fpath: &str) -> Attachment {
-    let file_bytes = std::fs::read(fpath).unwrap();
-    let file_hash: sha256::Hash = Hash::hash(&file_bytes[..]);
-    let digest = file_hash.to_byte_array().into();
-    let mime = FileFormat::from_file(fpath)
-        .unwrap()
-        .media_type()
-        .to_string();
-    let media_ty: &'static str = Box::leak(mime.clone().into_boxed_str());
-    let media_type = MediaType::with(media_ty);
-    Attachment {
-        ty: media_type,
-        digest,
-    }
+/// Extract value from Union and two-layer Tuple
+fn extract_from_union_and_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
+    extract_from_union(v).and_then(|s| extract_from_2_layer_tuple(&s))
 }
 
 impl TestWallet {
@@ -2073,126 +1203,7 @@ impl TestWallet {
         let contract_id = self.issue_with_params(create_params);
         contract_id
     }
-}
 
-/// Immutable state part of RGB21 contract
-#[derive(Debug, Clone)]
-pub struct RGB21ContractImmutableState {
-    pub name: String,
-    pub total_fractions: u64,
-    pub token: Option<NFTMetadata>,
-}
-
-/// NFT metadata in RGB21 contract
-#[derive(Debug, Clone)]
-pub struct NFTMetadata {
-    pub index: u32,
-    pub amount: u64,
-    pub ticker: Option<String>,
-    pub name: Option<String>,
-    pub details: Option<String>,
-    pub preview: Option<MediaData>,
-    pub media: Option<MediaDigest>,
-    pub attachments: BTreeMap<u8, MediaDigest>,
-    pub reserves: Option<ReserveData>,
-}
-
-/// Media data with full content
-#[derive(Debug, Clone)]
-pub struct MediaData {
-    pub media_type: MediaTypeData,
-    pub data: Vec<u8>,
-}
-
-/// Media type information
-#[derive(Debug, Clone)]
-pub struct MediaTypeData {
-    pub r#type: String,
-    pub subtype: Option<String>,
-    pub charset: Option<String>,
-}
-
-/// Media digest (reference only)
-#[derive(Debug, Clone)]
-pub struct MediaDigest {
-    pub media_type: MediaTypeData,
-    pub digest: Vec<u8>,
-}
-
-/// Reserve proof data
-#[derive(Debug, Clone)]
-pub struct ReserveData {
-    pub utxo: Outpoint,
-    pub proof: Vec<u8>,
-}
-
-/// Owned state part of RGB21 contract
-#[derive(Debug, Clone)]
-pub struct RGB21ContractOwnedState {
-    pub fractions: Vec<(Outpoint, u64)>, // (outpoint, amount)
-}
-
-/// Complete RGB21 contract state
-#[derive(Debug, Clone)]
-pub struct RGB21ContractState {
-    pub immutable: RGB21ContractImmutableState,
-    pub owned: RGB21ContractOwnedState,
-}
-
-/// Extract the first element from a tuple
-fn extract_from_tuple(v: &StrictVal) -> Option<StrictVal> {
-    if let StrictVal::Tuple(s) = v {
-        if !s.is_empty() {
-            Some(s[0].clone())
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Extract the first element from a two-layer tuple
-fn extract_from_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
-    if let StrictVal::Tuple(t) = v {
-        if let Some(inner) = t.get(0) {
-            extract_from_tuple(inner)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Extract value from Union (for Option type)
-fn extract_from_union(v: &StrictVal) -> Option<StrictVal> {
-    if let StrictVal::Union(tag, t) = v {
-        if let EnumTag::Name(name) = tag {
-            if ***name == "some" {
-                Some(t.as_ref().clone())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Extract value from Union and single-layer Tuple
-fn extract_from_union_and_tuple(v: &StrictVal) -> Option<StrictVal> {
-    extract_from_union(v).and_then(|s| extract_from_tuple(&s))
-}
-
-/// Extract value from Union and two-layer Tuple
-fn extract_from_union_and_2_layer_tuple(v: &StrictVal) -> Option<StrictVal> {
-    extract_from_union(v).and_then(|s| extract_from_2_layer_tuple(&s))
-}
-
-impl TestWallet {
     /// Get RGB21 contract state
     pub fn contract_state_rgb21(&mut self, contract_id: ContractId) -> Option<RGB21ContractState> {
         self.contract_state_internal(contract_id)

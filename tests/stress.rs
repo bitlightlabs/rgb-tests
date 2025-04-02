@@ -27,9 +27,11 @@ use std::time::Instant;
 use std::{env::VarError, fs::File};
 use time::format_description::well_known::Iso8601;
 use time::{format_description, OffsetDateTime};
+use utils::NIAIssueParams;
 use utils::{
     chain::initialize,
-    helpers::{get_wallet, MetricDefinition, MetricType, Report, TransferType},
+    helper::reporting::{MetricDefinition, MetricType, Report},
+    helper::wallet::{get_wallet, TransferType},
     DescriptorType, DEFAULT_FEE_ABS, STRESS_DATA_DIR, TEST_DATA_DIR,
 };
 
@@ -135,8 +137,7 @@ fn back_and_forth(
 
     // In RGB v0.12, the close_method parameter is no longer required
     // Create and issue assets
-    let mut params =
-        utils::helpers::NIAIssueParams::new("TestAsset", "TEST", "centiMilli", issued_supply);
+    let mut params = NIAIssueParams::new("TestAsset", "TEST", "centiMilli", issued_supply);
     let utxo = wlt_1.get_utxo(None);
     params.add_allocation(utxo, issued_supply);
     let contract_id = wlt_1.issue_nia_with_params(params);
