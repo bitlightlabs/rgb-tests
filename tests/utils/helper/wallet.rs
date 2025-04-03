@@ -325,6 +325,7 @@ impl TestWallet {
     // It needs to be reloaded at a special time, and consider submitting a PR to RGB
     pub fn reload_runtime(&mut self) {
         self.runtime = make_runtime(&self.descriptor, self.network(), &self.wallet_dir);
+        self.sync();
     }
 
     pub fn change_instance(&mut self, instance: u8) {

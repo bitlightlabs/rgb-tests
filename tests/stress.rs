@@ -27,13 +27,13 @@ use std::time::Instant;
 use std::{env::VarError, fs::File};
 use time::format_description::well_known::Iso8601;
 use time::{format_description, OffsetDateTime};
-use utils::NIAIssueParams;
 use utils::{
     chain::initialize,
     helper::reporting::{MetricDefinition, MetricType, Report},
     helper::wallet::{get_wallet, TransferType},
     DescriptorType, DEFAULT_FEE_ABS, STRESS_DATA_DIR, TEST_DATA_DIR,
 };
+use utils::{fund_wallet, NIAIssueParams};
 
 pub mod utils;
 
@@ -138,7 +138,11 @@ fn back_and_forth(
     // In RGB v0.12, the close_method parameter is no longer required
     // Create and issue assets
     let mut params = NIAIssueParams::new("TestAsset", "TEST", "centiMilli", issued_supply);
+    // fund wlt_1 and get utxo
     let utxo = wlt_1.get_utxo(None);
+    // fund wlt_2
+    let _ = wlt_2.get_utxo(None);
+
     params.add_allocation(utxo, issued_supply);
     let contract_id = wlt_1.issue_nia_with_params(params);
     wlt_1.send_contract("TestAsset", &mut wlt_2);
@@ -158,7 +162,6 @@ fn back_and_forth(
     for i in 1..=loops {
         println!("loop {i}/{loops}");
         sats_send -= MIN_RELAY_FEE * 2;
-
         // In RGB v0.12, the send method parameters have been changed
         wlt_1.send(
             &mut wlt_2,
@@ -171,7 +174,9 @@ fn back_and_forth(
             Some(&mut report),
         );
 
-        sats_send -= DEFAULT_FEE_ABS * 2;
+        // Here we subtract MIN_RELAY_FEE * 2
+        // Because one MIN_RELAY_FEE is used for change, and one is used for fee
+        sats_send -= MIN_RELAY_FEE * 2;
 
         wlt_2.send(
             &mut wlt_1,
