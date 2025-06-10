@@ -432,6 +432,60 @@ fn transfer_loop(
     );
 }
 
+#[test]
+#[serial]
+fn spend_from_utxo_with_multiple_allocations() {
+    initialize();
+
+    let mut wlt_1 = get_wallet(&DescriptorType::Wpkh);
+    let mut wlt_2 = get_wallet(&DescriptorType::Wpkh);
+    let mut wlt_3 = get_wallet(&DescriptorType::Wpkh);
+
+    // 1. Preparation phase: Construct a state of "one UTXO, multiple allocations"
+
+    // 1.1. wlt_1 issues the asset
+    let issue_supply = 1200;
+    let mut params = NIAIssueParams::new("ConsolidationTest", "CON", "centiMilli", issue_supply);
+    let outpoint = wlt_1.get_utxo(None);
+    params.add_allocation(outpoint, issue_supply);
+    let contract_id = wlt_1.issue_nia_with_params(params);
+    wlt_1.send_contract("ConsolidationTest", &mut wlt_2);
+    wlt_2.reload_runtime();
+    wlt_1.send_contract("ConsolidationTest", &mut wlt_3);
+    wlt_3.reload_runtime();
+
+    // 1.2. wlt_2 obtains a specific UTXO to receive two payments
+    let receiving_utxo = wlt_2.get_utxo(None);
+
+    // 1.3. wlt_1 sends assets twice to the same UTXO of wlt_2
+    // First send 800
+    let invoice1 = wlt_2.invoice(contract_id, 800, false, None, Some(receiving_utxo));
+    wlt_1.send_to_invoice(&mut wlt_2, invoice1, None, None, None);
+
+    // Second send 200 to the exact same UTXO
+    let invoice2 = wlt_2.invoice(contract_id, 200, false, None, Some(receiving_utxo));
+    wlt_1.send_to_invoice(&mut wlt_2, invoice2, None, None, None);
+
+    // 1.4. Verify the initial state
+    // wlt_2 should now have two allocations on one UTXO, totaling 1000
+    wlt_2.check_allocations(contract_id, AssetSchema::RGB20, vec![800, 200]);
+    wlt_1.check_allocations(contract_id, AssetSchema::RGB20, vec![issue_supply - 800 - 200]); // Change 200
+
+    // 2. Action phase: wlt_2 spends part of the assets from this UTXO
+
+    // wlt_2 sends 400 to wlt_3
+    let amount_to_spend = 400;
+    wlt_2.send(&mut wlt_3, false, contract_id, amount_to_spend, 1000, None, None, None);
+
+    // 3. Verification phase: Check if the results are correct
+
+    wlt_3.check_allocations(contract_id, AssetSchema::RGB20, vec![amount_to_spend]);
+
+    // The change of wlt_2 should be 1000 - 400 = 600, and it should be a single merged allocation
+    let expected_change = 800 + 200 - amount_to_spend;
+    wlt_2.check_allocations(contract_id, AssetSchema::RGB20, vec![expected_change]); // Here fails, expect 600, but got 200, 400
+}
+
 #[rstest]
 #[case(TT::Blinded)]
 #[case(TT::Witness)]
