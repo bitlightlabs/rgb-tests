@@ -273,10 +273,10 @@ fn get_indexer(indexer_url: &str) -> AnyIndexer {
 }
 
 /// Broadcast a transaction
-fn broadcast_tx(tx: &Tx, indexer_url: &str) {
+fn broadcast_tx(tx: &Tx, indexer_url: &str) -> Result<(), String> {
     match get_indexer(indexer_url) {
         AnyIndexer::Electrum(inner) => {
-            inner.transaction_broadcast(tx).unwrap();
+            inner.transaction_broadcast(tx).map_err(|e| e.to_string())?;
         }
         AnyIndexer::Esplora(inner) => {
             inner
@@ -287,15 +287,17 @@ fn broadcast_tx(tx: &Tx, indexer_url: &str) {
                         e
                     );
                 })
-                .unwrap();
+                .map_err(|e| e.to_string())?;
         }
         _ => unreachable!("unsupported indexer"),
     }
+    Ok(())
 }
 
 /// Broadcast a transaction and mine a block
 pub fn broadcast_tx_and_mine(tx: &Tx, instance: u8) {
-    broadcast_tx(tx, &indexer_url(instance, Network::Regtest));
+    broadcast_tx(tx, &indexer_url(instance, Network::Regtest))
+        .expect("transaction must be broadcast successfully before a block be mined.");
     mine_custom(false, instance, 1);
 }
 
@@ -406,8 +408,8 @@ impl TestWallet {
         get_indexer(&self.indexer_url())
     }
 
-    pub fn broadcast_tx(&self, tx: &Tx) {
-        broadcast_tx(tx, &self.indexer_url());
+    pub fn broadcast_tx(&self, tx: &Tx) -> Result<(), String> {
+        broadcast_tx(tx, &self.indexer_url())
     }
 
     pub fn sync(&mut self) {
@@ -727,7 +729,9 @@ impl TestWallet {
 
         let tx = self.sign_finalize_extract(&mut psbt);
 
-        self.broadcast_tx(&tx);
+        // Only when the broadcast is successful can the correct transaction synchronization
+        // And consign generation be executed.
+        self.broadcast_tx(&tx).unwrap();
         std::thread::sleep(Duration::from_secs(10));
         self.sync();
 
@@ -742,7 +746,7 @@ impl TestWallet {
         (consignment, tx)
     }
 
-    fn consign<'a>(
+    pub fn consign<'a>(
         &mut self,
         contract_id: ContractId,
         mut psbt: Psbt,
@@ -764,7 +768,7 @@ impl TestWallet {
         );
 
         if broadcast {
-            self.broadcast_tx(&tx);
+            self.broadcast_tx(&tx).unwrap();
         }
 
         let consignment = self

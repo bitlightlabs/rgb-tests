@@ -158,7 +158,7 @@ fn rbf_unbroadcasted_state_all() {
     assert_eq!(initial_height, final_height);
 
     // Only broadcast and confirm first transaction
-    wlt_1.broadcast_tx(&first_tx);
+    wlt_1.broadcast_tx(&first_tx).unwrap();
     wlt_1.mine_tx(&first_tx.txid(), true);
     dbg!(first_txid, tx_status(first_txid, wlt_1.instance));
 
