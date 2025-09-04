@@ -1,0 +1,92 @@
+[package]
+name = "poc"
+version = "0.1.0"
+edition = "2021"
+description = "Proof of concept for RGB sandbox stockpile implementation"
+authors = ["RGB Tests"]
+license = "Apache-2.0"
+
+[dependencies]
+# Core RGB dependencies
+rgb-std = { path = "../rgb-std", features = ["binfile"] }
+rgb-persist-fs = { path = "../rgb-std/persistence/fs" }
+hypersonic = { path = "../sonic" }
+sonic-persist-fs = { path = "../sonic/persistence/fs" }
+rgb-runtime = { path = "../rgb" }
+
+# Standard libraries
+amplify = { path = "../rust-amplify" }
+strict_encoding = { path = "../strict-encoding/rust", features = ["serde"] }
+strict_types = { path = "../strict-types" }
+
+# Utilities
+indexmap = "2.7.0"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Testing
+rstest = "0.19.0"
+tempfile = "3.8"
+
+[patch.crates-io]
+# patching all RGB-related deps, to measure code coverage
+## rust-amplify
+amplify = { path = "../rust-amplify" }
+## amplify-derive
+amplify_derive = { path = "../amplify-derive" }
+amplify_syn = { path = "../amplify-derive/syn" }
+## amplify-nonasync
+nonasync = { path = "../amplify-nonasync" }
+## amplify-num
+amplify_num = { path = "../amplify-num/num" }
+## baid64
+baid64 = { path = "../rust-baid64" }
+## bp-core
+bp-core = { path = "../bp-core" }
+bp-consensus = { path = "../bp-core/consensus" }
+bp-dbc = { path = "../bp-core/dbc" }
+bp-seals = { path = "../bp-core/seals" }
+## bp-electrum-client
+bp-electrum = { path = "../bp-electrum-client" }
+## bp-esplora-client
+bp-esplora = { path = "../bp-esplora-client" }
+## bp-std
+bp-derive = { path = "../bp-std/derive" }
+bp-std = { path = "../bp-std" }
+descriptors = { path = "../bp-std/descriptors" }
+bp-invoice = { path = "../bp-std/invoice" }
+psbt = { path = "../bp-std/psbt" }
+## bp-wallet
+bp-wallet = { path = "../bp-wallet" }
+## client_side_validation
+commit_verify = { path = "../client_side_validation/commit_verify" }
+commit_encoding_derive = { path = "../client_side_validation/commit_verify/derive" }
+single_use_seals = { path = "../client_side_validation/single_use_seals" }
+## rgb
+rgb-runtime = { path = "../rgb" }
+rgb-psbt = { path = "../rgb/psbt" }
+## rgb-core
+rgb-core = { path = "../rgb-core" }
+## rgb-std
+rgb-invoice = { path = "../rgb-std/invoice" }
+rgb-std = { path = "../rgb-std" }
+rgb-persist-fs = { path = "../rgb-std/persistence/fs" }
+## rgb-interfaces
+rgb-interfaces = { path = "../rgb-interfaces" }
+## rust-aluvm
+aluvm = { path = "../rust-aluvm" }
+zk-aluvm = { path = "../zk-aluvm" }
+## SONIC
+ultrasonic = { path = "../ultrasonic" }
+sonic-api = { path = "../sonic/api" }
+sonic-callreq = { path = "../sonic/callreq" }
+hypersonic = { path = "../sonic" }
+sonic-persist-fs = { path = "../sonic/persistence/fs" }
+## strict-encoding
+strict_encoding = { path = "../strict-encoding/rust" }
+strict_encoding_derive = { path = "../strict-encoding/rust/derive" }
+## strict-types
+strict_types = { path = "../strict-types" }
