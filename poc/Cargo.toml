@@ -12,6 +12,9 @@ rgb-std = { path = "../rgb-std", features = ["binfile"] }
 rgb-persist-fs = { path = "../rgb-std/persistence/fs" }
 hypersonic = { path = "../sonic" }
 sonic-persist-fs = { path = "../sonic/persistence/fs" }
+sonic-api = { path = "../sonic/api" }
+sonic-callreq = { path = "../sonic/callreq" }
+ultrasonic = { path = "../ultrasonic" }
 rgb-runtime = { path = "../rgb" }
 
 # Standard libraries
@@ -23,6 +26,7 @@ strict_types = { path = "../strict-types" }
 indexmap = "2.7.0"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0"
+smallvec = "1.11"
 
 # Error handling
 thiserror = "1.0"
