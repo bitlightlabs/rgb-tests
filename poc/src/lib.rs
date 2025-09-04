@@ -76,7 +76,6 @@ pub mod rgb_components {
         use amplify::confinement::Confined;
         use amplify::{default, num::u256, zero};
         use hypersonic::{ContractMeta, ContractName, Issue};
-        use sonic_callreq::MethodName;
         use ultrasonic::{fe256, Genesis, Identity};
 
         // Load Issuer with a simple validator
@@ -85,22 +84,24 @@ pub mod rgb_components {
 
         // Extract components from Issuer, based on builders.rs pattern
         let codex_id = issuer.codex_id();
-        // Get the CallId of the first available method in the default API (before dismember)
-        // Try common method names, then fall back to others if they fail
-        let call_id = if let Ok(call_id) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                issuer.call_id(MethodName::from("issue"))
-            })) {
-            call_id
-        } else if let Ok(call_id) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            issuer.call_id(MethodName::from("genesis"))
-        })) {
-            call_id
+
+        // Get a valid CallId from the API's verifiers map
+        let default_api = issuer.default_api();
+
+        // Try to find a valid CallId from the available methods in the API
+        let call_id = if let Some((_, call_id)) = default_api.verifiers.first_key_value() {
+            // Use the first available method's CallId
+            *call_id
+        } else if let Some(call_state) = &default_api.default_call {
+            // Fall back to default_call if available, extract CallId properly
+            // Since default_call contains CallState with method field
+            if let Some(call_id) = default_api.verifier(call_state.method.clone()) {
+                call_id
+            } else {
+                panic!("No valid CallId found in API, this may cause issues");
+            }
         } else {
-            // If both fail, we need to check what methods are available in the issuer's default API
-            // For simplicity, we try to use a default CallId
-            use ultrasonic::CallId;
-            CallId::default()
+            panic!("Warning: No verifiers or default_call found in API");
         };
         let (codex, semantics) = issuer.dismember();
 
