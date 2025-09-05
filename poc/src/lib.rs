@@ -163,6 +163,48 @@ pub mod rgb_components {
         Ok(state)
     }
 
+    /// Creates a basic Operation for testing
+    pub fn create_test_operation(
+        articles: &Articles,
+        contract_id: Option<ultrasonic::ContractId>,
+    ) -> SandboxResult<ultrasonic::Operation> {
+        use ultrasonic::{Operation, fe256, StateValue};
+        use amplify::{default, num::u256, Wrapper};
+        use amplify::confinement::Confined;
+
+        // Get a valid CallId from the articles
+        let default_api = articles.default_api();
+        let call_id = if let Some((_, call_id)) = default_api.verifiers.first_key_value() {
+            *call_id
+        } else {
+            panic!("No valid CallId found in Articles");
+        };
+
+        // Use provided contract_id or generate a test one
+        let contract_id = contract_id.unwrap_or_else(|| {
+            // Create a test contract ID - in real scenarios this comes from contract deployment
+            use amplify::Array;
+            let mut bytes = [0u8; 32];
+            bytes[31] = 1; // Set the last byte to 1
+            ultrasonic::ContractId::from_inner(Array::from(bytes))
+        });
+
+        // Create a minimal operation with correct structure
+        let operation = Operation {
+            version: default!(),
+            contract_id,
+            call_id,
+            nonce: fe256::from(u256::ZERO),
+            witness: StateValue::None,                    // No witness for test operation
+            destructible_in: Confined::try_from(vec![]).unwrap(),  // Empty inputs  
+            immutable_in: Confined::try_from(vec![]).unwrap(),     // Empty inputs
+            destructible_out: Confined::try_from(vec![]).unwrap(), // Empty outputs
+            immutable_out: Confined::try_from(vec![]).unwrap(),    // Empty outputs
+        };
+
+        Ok(operation)
+    }
+
     /// Creates a complete StockFs for testing
     pub fn create_test_stock(
         articles: Articles,

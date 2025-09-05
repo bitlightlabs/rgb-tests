@@ -21,6 +21,10 @@ pub struct SandboxStock {
     base: StockFs,
     /// Writable delta storage for incremental changes  
     delta: StockFs,
+    /// Rollback state: when true, delta operations are logically ignored
+    is_rolled_back: bool,
+    /// Snapshot of delta operations at rollback point (for potential recovery)
+    rollback_snapshot: Option<u64>,
 }
 
 impl SandboxStock {
@@ -32,7 +36,12 @@ impl SandboxStock {
         let delta = StockFs::new(articles, state, config.delta_path)
             .map_err(SandboxError::DeltaStorage)?;
             
-        Ok(Self { base, delta })
+        Ok(Self { 
+            base, 
+            delta, 
+            is_rolled_back: false,
+            rollback_snapshot: None,
+        })
     }
     
     /// Create a sandbox by loading existing base storage and creating new delta
@@ -46,7 +55,12 @@ impl SandboxStock {
         let delta = StockFs::new(articles, state, config.delta_path)
             .map_err(SandboxError::DeltaStorage)?;
             
-        Ok(Self { base, delta })
+        Ok(Self { 
+            base, 
+            delta, 
+            is_rolled_back: false,
+            rollback_snapshot: None,
+        })
     }
     
     /// Get a reference to the base storage (read-only)
@@ -81,21 +95,42 @@ impl SandboxStock {
         Ok(())
     }
     
-    /// Discard all changes in the delta storage
+    /// Logically rollback all delta changes without physically deleting AORA data
+    /// 
+    /// Based on our AORA/AURA analysis, we implement rollback through logical isolation:
+    /// - AORA data (stash, trace, read) is kept for audit/history - never deleted
+    /// - AURA data (spent, valid) can be reset through transaction management  
+    /// - Application layer controls visibility of delta operations
     pub fn rollback(&mut self) -> SandboxResult<()> {
-        // For a full rollback, we would need to recreate the delta storage
-        // or implement an abort_transaction method
-        // For now, we'll reset the delta to match base initial state
+        println!("🔄 Performing AORA-compatible logical rollback...");
         
-        let articles = self.base.articles().clone();
-        let state = self.base.state().clone();
-        let path = self.delta.config();
+        // Step 1: Mark as rolled back (logical isolation)
+        self.is_rolled_back = true;
+        self.rollback_snapshot = Some(self.delta.operation_count());
         
-        // Recreate delta storage to effectively clear it
-        self.delta = StockFs::new(articles, state, path)
-            .map_err(SandboxError::DeltaStorage)?;
-            
+        // Step 2: Reset state to base state (this is safe)
+        let base_state = self.base.state().clone();
+        self.delta.update_state(|state, _| {
+            *state = base_state;
+        }).map_err(SandboxError::DeltaStorage)?;
+        
+        // Step 3: Commit the state reset (AURA transaction)
+        self.delta.commit_transaction();
+        
+        println!("✅ Logical rollback completed - delta operations hidden, AORA history preserved");
         Ok(())
+    }
+    
+    /// Re-enable delta operations after rollback
+    pub fn resume_delta_operations(&mut self) -> SandboxResult<()> {
+        self.is_rolled_back = false;
+        self.rollback_snapshot = None;
+        Ok(())
+    }
+    
+    /// Check if currently in rolled-back state
+    pub fn is_rolled_back(&self) -> bool {
+        self.is_rolled_back
     }
 }
 
@@ -109,7 +144,12 @@ impl Stock for SandboxStock {
         let delta = StockFs::new(articles, state, config.delta_path)
             .map_err(SandboxError::DeltaStorage)?;
             
-        Ok(Self { base, delta })
+        Ok(Self { 
+            base, 
+            delta, 
+            is_rolled_back: false,
+            rollback_snapshot: None,
+        })
     }
 
     fn load(config: SandboxConfig) -> SandboxResult<Self> {
@@ -141,7 +181,13 @@ impl Stock for SandboxStock {
     }
 
     fn has_operation(&self, opid: Opid) -> bool {
-        self.delta.has_operation(opid) || self.base.has_operation(opid)
+        if self.is_rolled_back {
+            // Rollback state: only query base, ignore delta
+            self.base.has_operation(opid)
+        } else {
+            // Normal state: delta-over-base
+            self.delta.has_operation(opid) || self.base.has_operation(opid)
+        }
     }
 
     fn operation_count(&self) -> u64 {
@@ -151,7 +197,11 @@ impl Stock for SandboxStock {
     }
 
     fn operation(&self, opid: Opid) -> Operation {
-        if self.delta.has_operation(opid) {
+        if self.is_rolled_back {
+            // Rollback state: only query base
+            self.base.operation(opid)
+        } else if self.delta.has_operation(opid) {
+            // Normal state: delta takes precedence
             self.delta.operation(opid)
         } else {
             self.base.operation(opid)
@@ -159,15 +209,23 @@ impl Stock for SandboxStock {
     }
 
     fn operations(&self) -> impl Iterator<Item = (Opid, Operation)> {
-        // Combine both iterators, with delta taking precedence
-        // This is a simplified implementation
-        self.delta.operations().chain(
-            self.base.operations().filter(|(opid, _)| !self.delta.has_operation(*opid))
-        )
+        if self.is_rolled_back {
+            // Rollback state: only return base operations
+            Box::new(self.base.operations()) as Box<dyn Iterator<Item = (Opid, Operation)>>
+        } else {
+            // Normal state: combine both iterators, with delta taking precedence
+            Box::new(self.delta.operations().chain(
+                self.base.operations().filter(|(opid, _)| !self.delta.has_operation(*opid))
+            )) as Box<dyn Iterator<Item = (Opid, Operation)>>
+        }
     }
 
     fn transition(&self, opid: Opid) -> Transition {
-        if self.delta.has_operation(opid) {
+        if self.is_rolled_back {
+            // Rollback state: only query base
+            self.base.transition(opid)
+        } else if self.delta.has_operation(opid) {
+            // Normal state: delta takes precedence
             self.delta.transition(opid)
         } else {
             self.base.transition(opid)
@@ -175,20 +233,35 @@ impl Stock for SandboxStock {
     }
 
     fn trace(&self) -> impl Iterator<Item = (Opid, Transition)> {
-        // Similar to operations, combine with delta precedence
-        self.delta.trace().chain(
-            self.base.trace().filter(|(opid, _)| !self.delta.has_operation(*opid))
-        )
+        if self.is_rolled_back {
+            // Rollback state: only return base trace
+            Box::new(self.base.trace()) as Box<dyn Iterator<Item = (Opid, Transition)>>
+        } else {
+            // Normal state: combine with delta precedence
+            Box::new(self.delta.trace().chain(
+                self.base.trace().filter(|(opid, _)| !self.delta.has_operation(*opid))
+            )) as Box<dyn Iterator<Item = (Opid, Transition)>>
+        }
     }
 
     fn read_by(&self, addr: CellAddr) -> impl Iterator<Item = Opid> {
-        // Combine read relationships from both storages
-        self.delta.read_by(addr).chain(self.base.read_by(addr))
+        if self.is_rolled_back {
+            // Rollback state: only return base read relationships
+            Box::new(self.base.read_by(addr)) as Box<dyn Iterator<Item = Opid>>
+        } else {
+            // Normal state: combine read relationships from both storages
+            Box::new(self.delta.read_by(addr).chain(self.base.read_by(addr))) as Box<dyn Iterator<Item = Opid>>
+        }
     }
 
     fn spent_by(&self, addr: CellAddr) -> Option<Opid> {
-        // Delta takes precedence for spending information
-        self.delta.spent_by(addr).or_else(|| self.base.spent_by(addr))
+        if self.is_rolled_back {
+            // Rollback state: only query base spending information
+            self.base.spent_by(addr)
+        } else {
+            // Normal state: delta takes precedence for spending information
+            self.delta.spent_by(addr).or_else(|| self.base.spent_by(addr))
+        }
     }
 
     // Write operations: Only affect delta storage
