@@ -80,18 +80,51 @@ impl SandboxStock {
     
     /// Commit the delta changes to the base storage
     /// 
-    /// This method would copy all changes from delta to base storage.
-    /// For now, this is a conceptual method - in a real implementation,
-    /// you would iterate through all delta operations and apply them to base.
+    /// This method merges all changes from delta to base storage.
+    /// After this operation, the delta becomes empty and all changes
+    /// are permanently committed to the base layer.
     pub fn commit_to_base(&mut self) -> SandboxResult<()> {
-        // TODO: Implement proper delta merging
-        // This would involve:
-        // 1. Iterating through all operations in delta
-        // 2. Adding them to base
-        // 3. Merging state changes
-        // 4. Clearing delta
-        
+        // Step 1: Ensure delta is in consistent state
         self.delta.commit_transaction();
+        
+        // Step 2: Copy all operations from delta to base
+        for (opid, operation) in self.delta.operations() {
+            self.base.add_operation(opid, &operation);
+        }
+        
+        // Step 3: Copy all transitions from delta to base  
+        for (opid, transition) in self.delta.trace() {
+            self.base.add_transition(opid, &transition);
+        }
+        
+        // Step 4: Merge validity and spending information
+        // Note: This is simplified - in practice we'd need to handle conflicts
+        for (opid, _) in self.delta.operations() {
+            if self.delta.is_valid(opid) {
+                self.base.mark_valid(opid);
+            } else {
+                self.base.mark_invalid(opid);
+            }
+        }
+        
+        // Step 5: Update base state to match delta state
+        let delta_state = self.delta.state().clone();
+        self.base.update_state(|state, _| {
+            *state = delta_state;
+        }).map_err(SandboxError::BaseStorage)?;
+        
+        // Step 6: Commit changes to base
+        self.base.commit_transaction();
+        
+        // Step 7: Reset delta to clean state
+        // Create fresh delta with same config but empty state
+        let articles = self.base.articles().clone();
+        let initial_state = self.base.state().clone();
+        let config = SandboxConfig::new(self.base.config(), self.delta.config());
+        
+        self.delta = StockFs::new(articles, initial_state, config.delta_path)
+            .map_err(SandboxError::DeltaStorage)?;
+        
         Ok(())
     }
     

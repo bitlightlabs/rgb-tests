@@ -62,10 +62,50 @@ where
     }
     
     /// Commit the delta changes to the base storage
+    /// 
+    /// This method merges all changes from delta pile to base pile.
+    /// Witnesses, seals, and status updates are copied from delta to base.
     pub fn commit_to_base(&mut self) -> SandboxResult<()> {
-        // TODO: Implement proper delta merging for pile data
-        // This would involve copying witnesses, seals, and status updates
+        // Step 1: Ensure delta is in consistent state
         self.delta.commit_transaction();
+        
+        // Step 2: Copy all witnesses from delta to base
+        for witness in self.delta.witnesses() {
+            // Add witness with all its associated data
+            // Use the first operation ID from the set as primary key
+            let first_opid = witness.opids.iter().next()
+                .copied()
+                .expect("Witness should have at least one operation ID");
+                
+            self.base.add_witness(
+                first_opid,
+                witness.id,
+                &witness.published,
+                &witness.client,
+                witness.status
+            );
+            
+            // Add seals for all operations this witness covers
+            for opid in &witness.opids {
+                let seals = self.delta.seals(*opid, u16::MAX);
+                if !seals.is_empty() {
+                    self.base.add_seals(*opid, seals);
+                }
+            }
+        }
+        
+        // Step 3: Sync witness status updates
+        for witness_id in self.delta.witness_ids() {
+            let status = self.delta.witness_status(witness_id);
+            self.base.update_witness_status(witness_id, status);
+        }
+        
+        // Step 4: Commit all changes to base
+        self.base.commit_transaction();
+        
+        // Step 5: Reset delta to clean state
+        self.delta = PileFs::new(self.config.delta_path.clone())?;
+        
         Ok(())
     }
     
