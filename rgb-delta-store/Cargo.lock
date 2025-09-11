@@ -777,34 +777,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
-name = "poc"
-version = "0.1.0"
-dependencies = [
- "amplify",
- "bp-core",
- "bp-std",
- "bp-wallet",
- "hex",
- "hypersonic",
- "indexmap",
- "rgb-persist-fs",
- "rgb-runtime",
- "rgb-std",
- "rstest",
- "serde",
- "serde_json",
- "smallvec",
- "sonic-api",
- "sonic-callreq",
- "sonic-persist-fs",
- "strict_encoding",
- "strict_types",
- "tempfile",
- "thiserror",
- "ultrasonic",
-]
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -978,6 +950,34 @@ dependencies = [
  "strict_encoding",
  "ultrasonic",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "rgb-delta-store"
+version = "0.1.0"
+dependencies = [
+ "amplify",
+ "bp-core",
+ "bp-std",
+ "bp-wallet",
+ "hex",
+ "hypersonic",
+ "indexmap",
+ "rgb-persist-fs",
+ "rgb-runtime",
+ "rgb-std",
+ "rstest",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "sonic-api",
+ "sonic-callreq",
+ "sonic-persist-fs",
+ "strict_encoding",
+ "strict_types",
+ "tempfile",
+ "thiserror",
+ "ultrasonic",
 ]
 
 [[package]]

@@ -1,8 +1,8 @@
 [package]
-name = "poc"
+name = "rgb-delta-store"
 version = "0.1.0"
 edition = "2021"
-description = "Proof of concept for RGB sandbox stockpile implementation"
+description = "Delta-over-base transactional storage for RGB protocol with sandbox capabilities"
 authors = ["RGB Tests"]
 license = "Apache-2.0"
 
