@@ -34,6 +34,14 @@ thiserror = "1.0"
 # Testing
 rstest = "0.19.0"
 tempfile = "3.8"
+bp-wallet = { path = "../bp-wallet" }
+bp-core = { path = "../bp-core" }
+bp-std = { path = "../bp-std" }
+hex = "0.4"
+
+[features]
+default = ["bitcoin"]
+bitcoin = []
 
 [patch.crates-io]
 # patching all RGB-related deps, to measure code coverage
@@ -73,7 +81,7 @@ single_use_seals = { path = "../client_side_validation/single_use_seals" }
 rgb-runtime = { path = "../rgb" }
 rgb-psbt = { path = "../rgb/psbt" }
 ## rgb-core
-rgb-core = { path = "../rgb-core" }
+rgb-core = { path = "../rgb-core", features = ["bitcoin"] }
 ## rgb-std
 rgb-invoice = { path = "../rgb-std/invoice" }
 rgb-std = { path = "../rgb-std" }

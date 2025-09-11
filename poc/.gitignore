@@ -1,0 +1,6 @@
+coverage
+*.lcov
+coverage-reports
+docs
+.cargo
+.github
