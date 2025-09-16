@@ -23,28 +23,22 @@ use rgb::{
     Issuer, IssuerError, Pile, RgbSeal, Stock, Stockpile,
 };
 use sonic_persist_fs::{FsError, StockFs};
-use rgb_persist_fs::PileFs;
+use rgb_persist_fs::{PileFs, StockpileDir};
 
 use crate::SandboxConfig;
 
-/// A delta-over-base implementation of Stockpile focused on state management
-/// for Lightning Network RGB transactions. The delta layer only manages state changes
-/// of existing contracts from the base layer, without creating new contracts or issuers.
-#[derive(Clone, PartialEq, Eq, Debug)]  
+/// A delta-over-base implementation of Stockpile that wraps a base stockpile
+/// and provides transactional semantics for Lightning Network RGB transactions.
+/// The delta layer manages state modifications while the base stockpile handles
+/// core contract and issuer operations.
+#[derive(Clone, Debug)]  
 pub struct DeltaStockpileDir<Seal: RgbSeal> {
-    consensus: Consensus,
-    testnet: bool,
-    /// Base directory for read-only stockpile data (contains all contracts/issuers)
-    base_dir: PathBuf,
+    /// The underlying base stockpile that handles contract and issuer operations
+    base_stockpile: StockpileDir<Seal>,
     /// Delta directory for state modifications only  
     delta_dir: PathBuf,
     /// Configuration for sandbox operations
     config: SandboxConfig,
-    /// Cached issuer metadata from base layer (immutable during delta operations)
-    base_issuers: HashMap<CodexId, String>,
-    /// Cached contract metadata from base layer (immutable during delta operations)
-    base_contracts: HashMap<ContractId, String>,
-    _phantom: PhantomData<Seal>,
 }
 
 impl<Seal: RgbSeal> DeltaStockpileDir<Seal> {
@@ -55,61 +49,38 @@ impl<Seal: RgbSeal> DeltaStockpileDir<Seal> {
         consensus: Consensus,
         testnet: bool,
     ) -> Result<Self, io::Error> {
-        // Load base layer metadata
-        let mut base_issuers = HashMap::new();
-        let mut base_contracts = HashMap::new();
-
-        if base_dir.exists() {
-            let readdir = fs::read_dir(&base_dir)?;
-            for entry in readdir {
-                let entry = entry?;
-                let path = entry.path();
-                let ty = entry.file_type()?;
-                let Some(extension) = path.extension().and_then(OsStr::to_str) else {
-                    continue;
-                };
-                let Some(name) = path.file_stem().and_then(OsStr::to_str) else {
-                    continue;
-                };
-                let Some((name, id_str)) = name.split_once('.') else {
-                    continue;
-                };
-                if ty.is_file() && extension == "issuer" {
-                    let Ok(id) = CodexId::from_str(id_str) else {
-                        continue;
-                    };
-                    base_issuers.insert(id, name.to_string());
-                } else if ty.is_dir() && extension == "contract" {
-                    let Ok(id) = ContractId::from_str(id_str) else {
-                        continue;
-                    };
-                    base_contracts.insert(id, name.to_string());
-                }
-            }
-        }
+        // Create the base stockpile from the base directory
+        let base_stockpile = StockpileDir::load(base_dir.clone(), consensus, testnet)?;
 
         // Create delta directory if it doesn't exist (for state modifications only)
         if !delta_dir.exists() {
             fs::create_dir_all(&delta_dir)?;
         }
 
-        let config = SandboxConfig::new(base_dir.clone(), delta_dir.clone());
+        let config = SandboxConfig::new(base_dir, delta_dir.clone());
 
         Ok(Self {
-            consensus,
-            testnet,
-            base_dir,
+            base_stockpile,
             delta_dir,
             config,
-            base_issuers,
-            base_contracts,
-            _phantom: PhantomData,
         })
+    }
+
+    /// Get access to the base stockpile, ignoring any delta modifications
+    /// This provides a "clean" view of the stockpile as if delta changes don't exist
+    pub fn base(&self) -> &StockpileDir<Seal> {
+        &self.base_stockpile
+    }
+
+    /// Get mutable access to the base stockpile for direct operations
+    /// Operations through this interface will be immediately persisted to base layer
+    pub fn base_mut(&mut self) -> &mut StockpileDir<Seal> {
+        &mut self.base_stockpile
     }
 
     /// Get the base directory path
     pub fn base_dir(&self) -> &Path { 
-        self.base_dir.as_path() 
+        self.base_stockpile.dir()
     }
 
     /// Get the delta directory path  
@@ -122,37 +93,6 @@ impl<Seal: RgbSeal> DeltaStockpileDir<Seal> {
         &self.config
     }
 
-    /// Check if an issuer exists (only in base layer for Lightning Network scenario)
-    fn has_issuer_internal(&self, codex_id: CodexId) -> bool {
-        self.base_issuers.contains_key(&codex_id)
-    }
-
-    /// Check if a contract exists (only in base layer for Lightning Network scenario)
-    fn has_contract_internal(&self, contract_id: ContractId) -> bool {
-        self.base_contracts.contains_key(&contract_id)
-    }
-
-    /// Get contract directory path from base layer
-    /// In Lightning Network scenario, all contracts exist in base layer
-    fn get_contract_dir(&self, contract_id: ContractId) -> Option<PathBuf> {
-        if let Some(subdir) = self.base_contracts.get(&contract_id) {
-            let path = self.base_dir.join(format!("{subdir}.{contract_id:-}.contract"));
-            Some(path)
-        } else {
-            None
-        }
-    }
-
-    /// For Lightning Network scenario, we should not create new contracts in delta layer
-    /// This method is kept for interface compatibility but should not be used
-    fn create_contract_dir(&mut self, articles: &Articles) -> io::Result<PathBuf> {
-        // In Lightning Network RGB, contracts are pre-existing in base layer
-        // Creating new contracts in delta layer would violate the intended usage pattern
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Creating new contracts in delta layer is not supported in Lightning Network RGB scenario"
-        ))
-    }
 
     /// Commit delta changes to base layer
     /// For Lightning Network RGB, this merges state changes from delta to base  
@@ -213,76 +153,70 @@ where
     type Error = io::Error;
 
     fn consensus(&self) -> Consensus { 
-        self.consensus 
+        self.base_stockpile.consensus()
     }
 
     fn is_testnet(&self) -> bool { 
-        self.testnet 
+        self.base_stockpile.is_testnet()
     }
 
     fn issuers_count(&self) -> usize { 
-        // In Lightning Network scenario, all issuers are in base layer
-        self.base_issuers.len()
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.issuers_count()
     }
 
     fn contracts_count(&self) -> usize { 
-        // In Lightning Network scenario, all contracts are in base layer
-        self.base_contracts.len()
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.contracts_count()
     }
 
     fn has_issuer(&self, codex_id: CodexId) -> bool { 
-        self.has_issuer_internal(codex_id)
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.has_issuer(codex_id)
     }
 
     fn has_contract(&self, contract_id: ContractId) -> bool {
-        self.has_contract_internal(contract_id)
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile  
+        self.base_stockpile.has_contract(contract_id)
     }
 
     fn codex_ids(&self) -> impl Iterator<Item = CodexId> { 
-        // In Lightning Network scenario, all issuers are in base layer
-        self.base_issuers.keys().copied().collect::<Vec<_>>().into_iter()
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.codex_ids()
     }
 
     fn contract_ids(&self) -> impl Iterator<Item = ContractId> { 
-        // In Lightning Network scenario, all contracts are in base layer
-        self.base_contracts.keys().copied().collect::<Vec<_>>().into_iter()
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.contract_ids()
     }
 
     fn issuer(&self, codex_id: CodexId) -> Option<Issuer> {
-        // In Lightning Network scenario, all issuers are in base layer
-        if let Some(name) = self.base_issuers.get(&codex_id) {
-            let path = self.base_dir.join(format!("{name}.{codex_id:#}.issuer"));
-            Issuer::load(path, |_, _, _| -> Result<_, Infallible> { Ok(()) }).ok()
-        } else {
-            None
-        }
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.issuer(codex_id)
     }
 
     fn contract(&self, contract_id: ContractId) -> Option<Contract<Self::Stock, Self::Pile>> {
-        let path = self.get_contract_dir(contract_id)?;
-        
-        // Load contract from the determined path (either base or delta)
-        let contract = Contract::load(path.clone(), path).ok()?;
-        let meta = &contract.articles().issue().meta;
-        if meta.consensus != self.consensus || meta.testnet != self.testnet {
-            return None;
-        }
-        Some(contract)
+        // TODO: This should consider delta modifications in the future
+        // For now, just forward to base stockpile
+        self.base_stockpile.contract(contract_id)
     }
 
-    fn import_issuer(&mut self, _issuer: Issuer) -> Result<Issuer, Self::Error> {
-        // In Lightning Network RGB scenario, issuers should not be imported into delta layer
-        // All issuers should already exist in the base layer from funding transaction
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Importing new issuers is not supported in Lightning Network RGB scenario"
-        ))
+    fn import_issuer(&mut self, issuer: Issuer) -> Result<Issuer, Self::Error> {
+        // Forward to the base stockpile for persistent storage
+        self.base_stockpile.import_issuer(issuer)
     }
 
     fn import_contract(
         &mut self,
-        _articles: Articles,
-        _consignment: Consignment<Seal>,
+        articles: Articles,
+        consignment: Consignment<Seal>,
     ) -> Result<
         Contract<Self::Stock, Self::Pile>,
         MultiError<
@@ -296,34 +230,21 @@ where
         Seal::Published: strict_encoding::StrictDecode,
         Seal::WitnessId: strict_encoding::StrictDecode,
     {
-        // In Lightning Network RGB scenario, contracts should not be imported into delta layer
-        // All contracts should already exist in the base layer from funding transaction
-        Err(MultiError::C(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Importing new contracts is not supported in Lightning Network RGB scenario"
-        )))
+        // Forward to the base stockpile for persistent storage
+        self.base_stockpile.import_contract(articles, consignment)
     }
 
     fn issue(
         &mut self,
-        _params: CreateParams<<<Self::Pile as Pile>::Seal as RgbSeal>::Definition>,
+        params: CreateParams<<<Self::Pile as Pile>::Seal as RgbSeal>::Definition>,
     ) -> Result<Contract<Self::Stock, Self::Pile>, MultiError<IssuerError, FsError, io::Error>>
     {
-        // In Lightning Network RGB scenario, new contracts should not be issued in delta layer
-        // All contracts should already exist in the base layer from funding transaction
-        Err(MultiError::C(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Issuing new contracts is not supported in Lightning Network RGB scenario"
-        )))
+        // Forward to the base stockpile for persistent storage
+        self.base_stockpile.issue(params)
     }
 
-    fn purge(&mut self, _contract_id: ContractId) -> Result<(), Self::Error> {
-        // In Lightning Network RGB scenario, contracts should not be purged
-        // Contracts are pre-existing and should remain stable in base layer
-        // State modifications are handled at the state level, not contract level
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Purging contracts is not supported in Lightning Network RGB scenario"
-        ))
+    fn purge(&mut self, contract_id: ContractId) -> Result<(), Self::Error> {
+        // Forward to the base stockpile for persistent storage
+        self.base_stockpile.purge(contract_id)
     }
 }
