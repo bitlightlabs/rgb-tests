@@ -130,11 +130,12 @@ impl<Seal: RgbSeal> DeltaStockpileDir<Seal> {
     /// Rollback all delta changes
     /// This discards all changes in the delta layer without affecting the base
     pub fn rollback(&mut self) -> Result<(), io::Error> {
-        // Remove all delta files and directories
+        // Remove all delta files and directories, then recreate empty directory
         if self.delta_dir.exists() {
             fs::remove_dir_all(&self.delta_dir)?;
-            fs::create_dir_all(&self.delta_dir)?;
         }
+        // Always ensure delta directory exists and is empty after rollback
+        fs::create_dir_all(&self.delta_dir)?;
         
         // No delta metadata to clear in Lightning Network scenario
         Ok(())
