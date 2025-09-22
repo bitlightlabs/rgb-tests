@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-use poc::{SandboxConfig, SandboxResult};
+use rgb_delta_store::{SandboxConfig, SandboxResult};
 
 #[cfg(test)]
 mod basic_coverage_tests {
@@ -222,8 +222,8 @@ mod basic_coverage_tests {
         let fs_error1 = FsError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "test base error"));
         let fs_error2 = FsError::Io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "test delta error"));
         
-        let base_error = poc::SandboxError::BaseStorage(fs_error1);
-        let delta_error = poc::SandboxError::DeltaStorage(fs_error2);
+        let base_error = rgb_delta_store::SandboxError::BaseStorage(fs_error1);
+        let delta_error = rgb_delta_store::SandboxError::DeltaStorage(fs_error2);
         
         // Test error display
         let base_str = format!("{}", base_error);
@@ -251,7 +251,7 @@ mod basic_coverage_tests {
         fn test_function_error() -> SandboxResult<String> {
             use sonic_persist_fs::FsError;
             let fs_error = FsError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test error"));
-            Err(poc::SandboxError::BaseStorage(fs_error))
+            Err(rgb_delta_store::SandboxError::BaseStorage(fs_error))
         }
         
         // Test success case

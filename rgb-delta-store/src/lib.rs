@@ -9,7 +9,7 @@ mod delta_stockpile;
 mod sandbox_pile;
 mod sandbox_stock;
 
-pub use delta_stockpile::DeltaStockpileDir;
+pub use delta_stockpile::{BaseStockpileView, DeltaStockpileDir};
 pub use sandbox_pile::SandboxPile;
 pub use sandbox_stock::SandboxStock;
 
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 // RGB component imports
 use hypersonic::{Articles, EffectiveState, Stock};
 use rgb::Issuer;
-use sonic_persist_fs::{FsError, StockFs};
+use sonic_persist_fs::StockFs;
 
 /// Configuration for creating a sandbox stockpile
 #[derive(Clone, Debug, PartialEq, Eq)]

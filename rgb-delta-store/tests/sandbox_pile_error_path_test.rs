@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use tempfile::TempDir;
-use poc::{SandboxConfig, SandboxResult};
+use rgb_delta_store::{SandboxConfig, SandboxResult};
 
 // For testing error paths, we need to try to use SandboxPile in ways that fail early
 // This will still exercise the code paths and improve coverage metrics
@@ -238,7 +238,7 @@ mod sandbox_pile_error_path_tests {
     fn test_sandbox_pile_result_error_conversion() {
         // Test error conversion patterns that SandboxPile might encounter
         
-        use poc::{SandboxError, SandboxResult};
+        use rgb_delta_store::{SandboxError, SandboxResult};
         use sonic_persist_fs::FsError;
         
         // Test conversion from FsError to SandboxError

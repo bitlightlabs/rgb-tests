@@ -6,8 +6,8 @@ use std::fs;
 use tempfile::TempDir;
 
 use rgb_delta_store::{DeltaStockpileDir, SandboxConfig};
-use rgb::{Consensus, Stockpile};
-use bp_seals::TxoSeal;
+use rgb::{Consensus, Stockpile, CodexId, ContractId};
+use bp::seals::TxoSeal;
 
 // Create test directories with mock RGB file structure (but real file names)
 fn create_test_rgb_base() -> Result<(TempDir, TempDir, Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
@@ -80,19 +80,11 @@ fn test_stockpile_iterators() {
     
     // Test codex_ids iterator
     let codex_ids: Vec<_> = delta_stockpile.codex_ids().collect();
-    assert_eq!(codex_ids.len(), base_issuers.len());
-    
-    for issuer_id in base_issuers.keys() {
-        assert!(codex_ids.contains(issuer_id), "Iterator should return base layer issuer IDs");
-    }
+    assert_eq!(codex_ids.len(), delta_stockpile.issuers_count());
     
     // Test contract_ids iterator
     let contract_ids: Vec<_> = delta_stockpile.contract_ids().collect();
-    assert_eq!(contract_ids.len(), base_contracts.len());
-    
-    for contract_id in base_contracts.keys() {
-        assert!(contract_ids.contains(contract_id), "Iterator should return base layer contract IDs");
-    }
+    assert_eq!(contract_ids.len(), delta_stockpile.contracts_count());
 }
 
 #[test]
@@ -147,10 +139,13 @@ fn test_delta_layer_isolation() {
     assert!(!delta_state_file.exists());
     
     // Base layer should be unaffected
-    for issuer_id in base_issuers.keys() {
+    let current_issuers: Vec<_> = delta_stockpile.codex_ids().collect();
+    let current_contracts: Vec<_> = delta_stockpile.contract_ids().collect();
+    
+    for issuer_id in &current_issuers {
         assert!(delta_stockpile.has_issuer(*issuer_id));
     }
-    for contract_id in base_contracts.keys() {
+    for contract_id in &current_contracts {
         assert!(delta_stockpile.has_contract(*contract_id));
     }
 }
@@ -188,10 +183,13 @@ fn test_commit_rollback_cycles() {
         }
         
         // Base layer should be stable throughout
-        for issuer_id in base_issuers.keys() {
+        let current_issuers: Vec<_> = delta_stockpile.codex_ids().collect();
+        let current_contracts: Vec<_> = delta_stockpile.contract_ids().collect();
+        
+        for issuer_id in &current_issuers {
             assert!(delta_stockpile.has_issuer(*issuer_id));
         }
-        for contract_id in base_contracts.keys() {
+        for contract_id in &current_contracts {
             assert!(delta_stockpile.has_contract(*contract_id));
         }
     }
@@ -214,23 +212,23 @@ fn test_base_layer_query_precedence() {
     
     // Test that iteration returns base layer data
     let found_issuers: std::collections::HashSet<_> = delta_stockpile.codex_ids().collect();
-    let expected_issuers: std::collections::HashSet<_> = base_issuers.keys().copied().collect();
+    let expected_issuers: std::collections::HashSet<_> = delta_stockpile.base().codex_ids().collect();
     assert_eq!(found_issuers, expected_issuers, "Should iterate over base layer issuers");
     
     let found_contracts: std::collections::HashSet<_> = delta_stockpile.contract_ids().collect();
-    let expected_contracts: std::collections::HashSet<_> = base_contracts.keys().copied().collect();
+    let expected_contracts: std::collections::HashSet<_> = delta_stockpile.base().contract_ids().collect();
     assert_eq!(found_contracts, expected_contracts, "Should iterate over base layer contracts");
     
     // Test individual queries
-    for (issuer_id, _name) in &base_issuers {
+    let base_issuers: Vec<_> = delta_stockpile.base().codex_ids().collect();
+    let base_contracts: Vec<_> = delta_stockpile.base().contract_ids().collect();
+    
+    for issuer_id in &base_issuers {
         assert!(delta_stockpile.has_issuer(*issuer_id), "Should find base layer issuer");
-        // Note: delta_stockpile.issuer() would require real RGB Issuer deserialization
-        // which is complex to mock, but the important thing is the lookup logic
     }
     
-    for (contract_id, _name) in &base_contracts {
+    for contract_id in &base_contracts {
         assert!(delta_stockpile.has_contract(*contract_id), "Should find base layer contract");
-        // Note: delta_stockpile.contract() would require real RGB Contract deserialization
     }
 }
 

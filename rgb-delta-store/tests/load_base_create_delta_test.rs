@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 // Import our sandbox implementation
-use poc::SandboxConfig;
+use rgb_delta_store::SandboxConfig;
 
 #[cfg(test)]
 mod load_base_create_delta_tests {

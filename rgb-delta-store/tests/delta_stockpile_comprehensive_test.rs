@@ -223,18 +223,12 @@ fn test_base_stockpile_access_patterns() {
         true,
     ).expect("Failed to create DeltaStockpileDir");
     
-    // Test that base() and base_mut() access the same underlying stockpile
+    // Test that base() provides consistent access to underlying stockpile
     let base_ref = delta_stockpile.base();
     let base_consensus = base_ref.consensus();
     let base_testnet = base_ref.is_testnet();
     
-    let base_mut_ref = delta_stockpile.base_mut();
-    let base_mut_consensus = base_mut_ref.consensus();
-    let base_mut_testnet = base_mut_ref.is_testnet();
-    
-    // Should have identical properties
-    assert_eq!(base_consensus, base_mut_consensus);
-    assert_eq!(base_testnet, base_mut_testnet);
+    // Should have expected properties
     assert_eq!(base_consensus, Consensus::Bitcoin);
     assert_eq!(base_testnet, true);
     

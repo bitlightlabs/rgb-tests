@@ -15,7 +15,7 @@ use amplify::confinement::SmallOrdMap;
 use std::num::NonZeroU64;
 
 // Import our sandbox implementation
-use poc::{SandboxPile, SandboxConfig};
+use rgb_delta_store::{SandboxPile, SandboxConfig};
 
 #[cfg(test)]
 mod pile_integration_tests {

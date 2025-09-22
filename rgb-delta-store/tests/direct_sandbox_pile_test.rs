@@ -4,7 +4,7 @@
 // to ensure actual code coverage of the SandboxPile implementation.
 
 use tempfile::TempDir;
-use poc::{SandboxConfig, SandboxPile};
+use rgb_delta_store::{SandboxConfig, SandboxPile};
 use bpwallet::seals::TxoSeal;
 use rgb_persist_fs::PileFs;
 use rgb::Pile; // Import the Pile trait

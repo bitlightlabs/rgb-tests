@@ -37,8 +37,8 @@ fn test_base_access_method() {
         true, // testnet
     ).expect("Failed to create DeltaStockpileDir");
     
-    // Test base() method returns the underlying stockpile
-    let base_stockpile: &StockpileDir<TxoSeal> = delta_stockpile.base();
+    // Test base() method returns the base stockpile view
+    let base_stockpile = delta_stockpile.base();
     
     // Should have the same consensus settings
     assert_eq!(base_stockpile.consensus(), Consensus::Bitcoin);
@@ -62,12 +62,12 @@ fn test_base_mut_access() {
         true, // testnet
     ).expect("Failed to create DeltaStockpileDir");
     
-    // Test base_mut() method returns mutable reference
-    let base_stockpile_mut = delta_stockpile.base_mut();
+    // Test base() method returns read-only view
+    let base_stockpile_view = delta_stockpile.base();
     
     // Should be able to access methods (though we can't test actual operations without real RGB data)
-    assert_eq!(base_stockpile_mut.consensus(), Consensus::Bitcoin);
-    assert_eq!(base_stockpile_mut.is_testnet(), true);
+    assert_eq!(base_stockpile_view.consensus(), Consensus::Bitcoin);
+    assert_eq!(base_stockpile_view.is_testnet(), true);
 }
 
 #[test]
