@@ -24,7 +24,37 @@ use rgb::{
     Issuer, IssuerError, Pile, RgbSeal, Stock, Stockpile,
 };
 
+/// A trait for stockpile implementations that support a transactional,
+/// delta-over-base layer model.
+///
+/// This extends the base `Stockpile` trait with methods for committing
+/// and rolling back state changes, providing atomic operations over a
+/// set of contracts.
+pub trait DeltaStockpile: Stockpile {
+    /// The type of the read-only view of the base layer.
+    /// This view itself must also implement `Stockpile` to be useful.
+    type BaseView<'a>: Stockpile<Stock = Self::Stock, Pile = Self::Pile, Error = Self::Error>
+    where
+        Self: 'a;
 
+    /// Returns a read-only view of the base layer, ignoring any
+    /// changes made in the current delta.
+    ///
+    /// This is useful for comparing the state before and after a series
+    /// of operations within a transaction.
+    fn base(&self) -> Self::BaseView<'_>;
+
+    /// Commits all pending changes from the delta layer to the
+    /// base layer, making them permanent.
+    ///
+    /// After a successful commit, the delta layer is cleared, and the
+    /// base layer reflects the new state.
+    fn commit(&mut self) -> Result<(), Self::Error>;
+
+    /// Discards all pending changes in the delta layer, reverting
+    /// to the last committed state of the base layer.
+    fn revert(&mut self) -> Result<(), Self::Error>;
+}
 
 /// A delta-over-base implementation of Stockpile focused on state management
 /// for Lightning Network RGB transactions. The delta layer only manages state changes
@@ -171,57 +201,6 @@ where
         })
     }
 
-    /// Commit delta changes to base layer
-    /// For Lightning Network RGB, this merges state changes from delta to base  
-    pub fn commit_to_base(&mut self) -> Result<(), io::Error>
-    where
-        Seal::WitnessId: From<[u8; 32]> + Into<[u8; 32]>,
-    {
-        // // Commit all active contracts by calling SandboxStock and SandboxPile commit_to_base
-        // for (_contract_id, (mut stock, mut pile)) in self..drain() {
-        //     stock.commit_to_base().map_err(|e| {
-        //         io::Error::new(io::ErrorKind::Other, format!("Stock commit failed: {}", e))
-        //     })?;
-
-        //     pile.commit_to_base().map_err(|e| {
-        //         io::Error::new(io::ErrorKind::Other, format!("Pile commit failed: {}", e))
-        //     })?;
-        // }
-
-        // // Clean up temporary files
-        // if self.delta_dir.exists() {
-        //     fs::remove_dir_all(&self.delta_dir)?;
-        //     fs::create_dir_all(&self.delta_dir)?;
-        // }
-
-        Ok(())
-    }
-
-    /// Rollback all delta changes
-    /// This discards all changes in the delta layer without affecting the base
-    pub fn rollback(&mut self) -> Result<(), io::Error>
-    where
-        Seal::WitnessId: From<[u8; 32]> + Into<[u8; 32]>,
-    {
-        // for (_contract_id, (mut stock, mut pile)) in self..iter_mut() {
-        //     stock.rollback().map_err(|e| {
-        //         io::Error::new(io::ErrorKind::Other, format!("Stock rollback failed: {}", e))
-        //     })?;
-
-        //     pile.rollback().map_err(|e| {
-        //         io::Error::new(io::ErrorKind::Other, format!("Pile rollback failed: {}", e))
-        //     })?;
-        // }
-
-        // // Clear active contracts cache and temporary files
-        // self..clear();
-        // if self.delta_dir.exists() {
-        //     fs::remove_dir_all(&self.delta_dir)?;
-        //     fs::create_dir_all(&self.delta_dir)?;
-        // }
-
-        Ok(())
-    }
 
     /// Get a view of only the base layer (without delta changes)
     pub fn base(&self) -> BaseStockpileView<'_, Seal> {
@@ -518,6 +497,78 @@ where
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Contract not found"))?;
         fs::remove_dir_all(&path)?;
         self.base_contracts.remove(&contract_id);
+        Ok(())
+    }
+}
+
+impl<Seal: RgbSeal> DeltaStockpile for DeltaStockpileDir<Seal>
+where
+    Seal::Client: strict_encoding::StrictEncode + strict_encoding::StrictDecode,
+    Seal::Published: Eq + strict_encoding::StrictEncode + strict_encoding::StrictDecode,
+    Seal::WitnessId: From<[u8; 32]> + Into<[u8; 32]>,
+{
+    type BaseView<'a> = BaseStockpileView<'a, Seal> where Self: 'a;
+
+    fn base(&self) -> Self::BaseView<'_> {
+        BaseStockpileView {
+            consensus: self.consensus,
+            testnet: self.testnet,
+            base_dir: &self.base_dir,
+            base_issuers: &self.base_issuers,
+            base_contracts: &self.base_contracts,
+            _phantom: PhantomData,
+        }
+    }
+
+    fn commit(&mut self) -> Result<(), Self::Error> {
+        // Commit all contracts - let SandboxStock/SandboxPile handle whether they have changes
+        for contract_id in self.base_contracts.keys().copied().collect::<Vec<_>>() {
+            if let Some(config) = self.get_contract_config(contract_id) {
+                // Load and commit stock
+                if let Ok(stock) = SandboxStock::load(&config) {
+                    stock.commit().map_err(|e| {
+                        io::Error::new(io::ErrorKind::Other, format!("Stock commit failed: {}", e))
+                    })?;
+                }
+
+                // Load and commit pile  
+                if let Ok(pile) = SandboxPile::<Seal>::load(&config) {
+                    pile.commit().map_err(|e| {
+                        io::Error::new(io::ErrorKind::Other, format!("Pile commit failed: {}", e))
+                    })?;
+                }
+            }
+        }
+
+        // Clean up delta directory after successful commits
+        if self.delta_dir.exists() {
+            fs::remove_dir_all(&self.delta_dir)?;
+            fs::create_dir_all(&self.delta_dir)?;
+        }
+        Ok(())
+    }
+
+    fn revert(&mut self) -> Result<(), Self::Error> {
+        // Revert all contracts - let SandboxStock/SandboxPile handle whether they have changes
+        for contract_id in self.base_contracts.keys().copied().collect::<Vec<_>>() {
+            if let Some(config) = self.get_contract_config(contract_id) {
+                // Load and revert stock
+                if let Ok(stock) = SandboxStock::load(&config) {
+                    let _ = stock.revert();
+                }
+
+                // Load and revert pile
+                if let Ok(pile) = SandboxPile::<Seal>::load(&config) {
+                    let _ = pile.revert();
+                }
+            }
+        }
+
+        // Clean up delta directory
+        if self.delta_dir.exists() {
+            fs::remove_dir_all(&self.delta_dir)?;
+            fs::create_dir_all(&self.delta_dir)?;
+        }
         Ok(())
     }
 }
