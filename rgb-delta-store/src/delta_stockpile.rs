@@ -525,15 +525,15 @@ where
         for contract_id in self.base_contracts.keys().copied().collect::<Vec<_>>() {
             if let Some(config) = self.get_contract_config(contract_id) {
                 // Load and commit stock
-                if let Ok(stock) = SandboxStock::load(&config) {
-                    stock.commit().map_err(|e| {
+                if let Ok(mut stock) = SandboxStock::load(config.clone()) {
+                    stock.commit_to_base().map_err(|e| {
                         io::Error::new(io::ErrorKind::Other, format!("Stock commit failed: {}", e))
                     })?;
                 }
 
                 // Load and commit pile  
-                if let Ok(pile) = SandboxPile::<Seal>::load(&config) {
-                    pile.commit().map_err(|e| {
+                if let Ok(mut pile) = SandboxPile::<Seal>::load(config.clone()) {
+                    pile.commit_to_base().map_err(|e| {
                         io::Error::new(io::ErrorKind::Other, format!("Pile commit failed: {}", e))
                     })?;
                 }
@@ -553,13 +553,13 @@ where
         for contract_id in self.base_contracts.keys().copied().collect::<Vec<_>>() {
             if let Some(config) = self.get_contract_config(contract_id) {
                 // Load and revert stock
-                if let Ok(stock) = SandboxStock::load(&config) {
-                    let _ = stock.revert();
+                if let Ok(mut stock) = SandboxStock::load(config.clone()) {
+                    let _ = stock.rollback();
                 }
 
                 // Load and revert pile
-                if let Ok(pile) = SandboxPile::<Seal>::load(&config) {
-                    let _ = pile.revert();
+                if let Ok(mut pile) = SandboxPile::<Seal>::load(config.clone()) {
+                    let _ = pile.rollback();
                 }
             }
         }

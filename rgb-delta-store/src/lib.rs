@@ -9,7 +9,7 @@ mod delta_stockpile;
 mod sandbox_pile;
 mod sandbox_stock;
 
-pub use delta_stockpile::{BaseStockpileView, DeltaStockpileDir};
+pub use delta_stockpile::{BaseStockpileView, DeltaStockpile, DeltaStockpileDir};
 pub use sandbox_pile::SandboxPile;
 pub use sandbox_stock::SandboxStock;
 
