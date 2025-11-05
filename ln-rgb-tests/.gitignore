@@ -1,0 +1,4 @@
+/target
+/Cargo.lock
+/tests/test_wallets
+docs/archived

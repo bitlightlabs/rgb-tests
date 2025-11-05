@@ -1,0 +1,127 @@
+[package]
+name = "ln-rgb-tests"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.0"
+authors = ["Bincheng Paopao"]
+description = "Lightning Network RGB integration tests"
+
+[dependencies]
+# RGB foundation libraries (reusing rgb-tests submodules)
+bp-core = { path = "../bp-core" }
+rgb-runtime = { path = "../rgb", features = ["fs", "serde"] }
+rgb-std = { path = "../rgb-std", features = ["binfile"] }
+bp-wallet = { path = "../bp-wallet", features = ["electrum", "esplora", "fs"] }
+bp-std = { path = "../bp-std", features = ["signers"] }
+descriptors = { path = "../bp-std/descriptors" }
+psbt = { path = "../bp-std/psbt" }
+
+# RGB delta store (deprecated - switched to original StockpileDir)
+# rgb-delta-store = { path = "../rgb-delta-store" }
+
+# Lightning RGB wallet libraries
+lightning-rgb-wallet = { path = "../../lightning-rgb-lib/lightning-rgb-wallet" }
+lightning-rgb-types = { path = "../../lightning-rgb-lib/lightning-rgb-types" }
+lightning-rgb-core = { path = "../../lightning-rgb-lib/lightning-rgb-core" }
+
+# Bitcoin
+bitcoin = "0.32"
+bitcoin_hashes = "0.14.0"
+
+# RGB related
+rgb-interfaces = { path = "../rgb-interfaces", features = ["serde"] }
+rgb-psbt = { path = "../rgb/psbt", features = ["bp"] }
+commit_verify = { path = "../client_side_validation/commit_verify" }
+single_use_seals = { path = "../client_side_validation/single_use_seals", features = ["strict_encoding"] }
+
+# Amplify
+amplify = { path = "../rust-amplify" }
+strict_encoding = { path = "../strict-encoding/rust", features = ["serde"] }
+strict_types = { path = "../strict-types" }
+
+# SONIC
+hypersonic = { path = "../sonic" }
+
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Testing utilities
+rstest = "0.19.0"
+rstest_reuse = "0.6.0"
+serial_test = "3.2.0"
+
+# Utility libraries
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+indexmap = "2.7.0"
+file-format = "0.25"
+rand = "0.8"
+time = "0.3"
+once_cell = "1.19"
+hex = "0.4"
+
+
+[patch.crates-io]
+# patching all RGB-related deps, to measure code coverage
+## rust-amplify
+amplify = { path = "../rust-amplify" }
+## amplify-derive
+amplify_derive = { path = "../amplify-derive" }
+amplify_syn = { path = "../amplify-derive/syn" }
+## amplify-nonasync
+nonasync = { path = "../amplify-nonasync" }
+## amplify-num
+amplify_num = { path = "../amplify-num/num" }
+## baid64
+baid64 = { path = "../rust-baid64" }
+## bp-core
+bp-core = { path = "../bp-core" }
+bp-consensus = { path = "../bp-core/consensus" }
+bp-dbc = { path = "../bp-core/dbc" }
+bp-seals = { path = "../bp-core/seals" }
+## bp-electrum-client
+bp-electrum = { path = "../bp-electrum-client" }
+## bp-esplora-client
+bp-esplora = { path = "../bp-esplora-client" }
+## bp-std
+bp-derive = { path = "../bp-std/derive" }
+bp-std = { path = "../bp-std" }
+descriptors = { path = "../bp-std/descriptors" }
+bp-invoice = { path = "../bp-std/invoice" }
+psbt = { path = "../bp-std/psbt" }
+## bp-wallet
+bp-wallet = { path = "../bp-wallet" }
+## client_side_validation
+commit_verify = { path = "../client_side_validation/commit_verify" }
+commit_encoding_derive = { path = "../client_side_validation/commit_verify/derive" }
+single_use_seals = { path = "../client_side_validation/single_use_seals" }
+## rgb
+rgb-runtime = { path = "../rgb" }
+rgb-psbt = { path = "../rgb/psbt" }
+## rgb-core
+rgb-core = { path = "../rgb-core" }
+## rgb-std
+rgb-invoice = { path = "../rgb-std/invoice" }
+rgb-std = { path = "../rgb-std" }
+rgb-persist-fs = { path = "../rgb-std/persistence/fs" }
+## rgb-interfaces
+rgb-interfaces = { path = "../rgb-interfaces" }
+## rust-aluvm
+aluvm = { path = "../rust-aluvm" }
+zk-aluvm = { path = "../zk-aluvm" }
+## SONIC
+ultrasonic = { path = "../ultrasonic" }
+sonic-api = { path = "../sonic/api" }
+sonic-callreq = { path = "../sonic/callreq" }
+hypersonic = { path = "../sonic" }
+sonic-persist-fs = { path = "../sonic/persistence/fs" }
+## strict-encoding
+strict_encoding = { path = "../strict-encoding/rust" }
+strict_encoding_derive = { path = "../strict-encoding/rust/derive" }
+## strict-types
+strict_types = { path = "../strict-types" }
