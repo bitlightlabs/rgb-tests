@@ -2,6 +2,7 @@
 //
 // Provides helper functions to create and manage LightningRGBWallet instances for testing
 
+use anyhow::{Context, Result};
 use bitcoin;
 use bpstd::Network;
 use std::path::PathBuf;
@@ -27,8 +28,8 @@ pub async fn start_rgb_wallet_actor_async(
     indexer_url: String,
     xprv: Xpriv,
     wallet_id: String,
-) -> Result<Arc<WalletController>, String> {
-    let (init_tx, init_rx) = oneshot::channel::<Result<WalletController, String>>();
+) -> Result<Arc<WalletController>> {
+    let (init_tx, init_rx) = oneshot::channel::<Result<WalletController>>();
 
     // Clone variables for thread
     let thread_storage_dir = storage_dir.clone();
@@ -46,7 +47,7 @@ pub async fn start_rgb_wallet_actor_async(
         {
             Ok(r) => r,
             Err(e) => {
-                let _ = init_tx.send(Err(format!("Failed to build Tokio runtime: {}", e)));
+                let _ = init_tx.send(Err(anyhow::anyhow!("Failed to build Tokio runtime: {}", e)));
                 return;
             }
         };
@@ -78,7 +79,7 @@ pub async fn start_rgb_wallet_actor_async(
 
                 let lrgb_wallet = wallet_builder
                     .build_stockpile::<StockpileTxo>()
-                    .map_err(|e| format!("Failed to build wallet: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to build wallet: {}", e))?;
 
                 // Start wallet actor
                 let actor_tx = start_wallet_actor(lrgb_wallet);
@@ -113,13 +114,13 @@ pub async fn start_rgb_wallet_actor_async(
     // Wait for initialization asynchronously
     let controller = init_rx
         .await
-        .map_err(|e| format!("Failed to receive from actor thread: {}", e))??;
+        .context("Failed to receive from actor thread")??;
 
     Ok(Arc::new(controller))
 }
 
 /// Internal helper: import all issuer files to a wallet
-async fn import_issuers_to_wallet(controller: &Arc<WalletController>) -> Result<(), String> {
+async fn import_issuers_to_wallet(controller: &Arc<WalletController>) -> Result<()> {
     use std::path::PathBuf;
 
     let issuer_dir = PathBuf::from("tests/templates/schemata");
@@ -127,8 +128,8 @@ async fn import_issuers_to_wallet(controller: &Arc<WalletController>) -> Result<
         return Ok(());
     }
 
-    for entry in std::fs::read_dir(&issuer_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(&issuer_dir).context("Failed to read issuer directory")? {
+        let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
         if path.is_file() && path.extension().is_some_and(|ext| ext == "issuer") {
             match rgb::Issuer::load(&path, |_, _, _| Ok::<(), std::io::Error>(())) {
@@ -162,9 +163,13 @@ async fn create_wallet_with_params(
     network: Network,
     indexer_url: String,
     xprv: Xpriv,
-) -> Result<Arc<WalletController>, String> {
+) -> Result<Arc<WalletController>> {
     std::fs::create_dir_all(&wallet_dir)
-        .map_err(|e| format!("Failed to create wallet dir: {}", e))?;
+        .context("Failed to create wallet dir")?;
+
+    // Set LRGB_L2_STATE_DIR to wallet directory to isolate L2 state files
+    // This prevents state pollution between test runs
+    std::env::set_var("LRGB_L2_STATE_DIR", &wallet_dir);
 
     let controller = start_rgb_wallet_actor_async(
         wallet_dir,
@@ -190,14 +195,28 @@ pub async fn create_test_wallet(
     wallet_name: &str,
     network: Network,
     indexer_url: String,
-) -> Result<Arc<WalletController>, String> {
+) -> Result<Arc<WalletController>> {
     let wallet_dir = get_test_wallet_dir(wallet_name);
     let xprv = generate_test_xprv(network);
     create_wallet_with_params(wallet_name, wallet_dir, network, indexer_url, xprv).await
 }
 
+/// Create a test wallet with provided xprv
+///
+/// Similar to create_test_wallet, but uses the provided xprv instead of generating random keys.
+/// Useful for multisig testing where reproducible keys are needed.
+pub async fn create_wallet_with_xprv(
+    wallet_name: &str,
+    network: Network,
+    indexer_url: String,
+    xprv: Xpriv,
+) -> Result<Arc<WalletController>> {
+    let wallet_dir = get_test_wallet_dir(wallet_name);
+    create_wallet_with_params(wallet_name, wallet_dir, network, indexer_url, xprv).await
+}
+
 /// Load or create persisted xprv for a wallet
-fn load_or_create_xprv(wallet_dir: &PathBuf, network: Network) -> Result<Xpriv, String> {
+fn load_or_create_xprv(wallet_dir: &PathBuf, network: Network) -> Result<Xpriv> {
     use std::fs;
     use std::io::{Read, Write};
 
@@ -205,20 +224,20 @@ fn load_or_create_xprv(wallet_dir: &PathBuf, network: Network) -> Result<Xpriv, 
 
     // Try to load existing xprv
     if xprv_file.exists() {
-        let mut file =
-            fs::File::open(&xprv_file).map_err(|e| format!("Failed to open xprv file: {}", e))?;
+        let mut file = fs::File::open(&xprv_file)
+            .context("Failed to open xprv file")?;
         let mut hex_str = String::new();
         file.read_to_string(&mut hex_str)
-            .map_err(|e| format!("Failed to read xprv file: {}", e))?;
+            .context("Failed to read xprv file")?;
 
         // Parse xprv from hex
-        let bytes =
-            hex::decode(hex_str.trim()).map_err(|e| format!("Failed to decode xprv hex: {}", e))?;
+        let bytes = hex::decode(hex_str.trim())
+            .context("Failed to decode xprv hex")?;
         if bytes.len() != 78 {
-            return Err("Invalid xprv length".to_string());
+            anyhow::bail!("Invalid xprv length");
         }
 
-        Xpriv::decode(&bytes).map_err(|e| format!("Failed to decode xprv: {}", e))
+        Xpriv::decode(&bytes).context("Failed to decode xprv")
     } else {
         // Generate new xprv and save
         let xprv = generate_test_xprv(network);
@@ -227,9 +246,9 @@ fn load_or_create_xprv(wallet_dir: &PathBuf, network: Network) -> Result<Xpriv, 
         let hex_str = hex::encode(&encoded);
 
         let mut file = fs::File::create(&xprv_file)
-            .map_err(|e| format!("Failed to create xprv file: {}", e))?;
+            .context("Failed to create xprv file")?;
         file.write_all(hex_str.as_bytes())
-            .map_err(|e| format!("Failed to write xprv file: {}", e))?;
+            .context("Failed to write xprv file")?;
 
         Ok(xprv)
     }
@@ -247,10 +266,10 @@ pub async fn reuse_test_wallet(
     wallet_name: &str,
     network: Network,
     indexer_url: String,
-) -> Result<Arc<WalletController>, String> {
+) -> Result<Arc<WalletController>> {
     let wallet_dir = get_test_wallet_dir_fixed(wallet_name);
     std::fs::create_dir_all(&wallet_dir)
-        .map_err(|e| format!("Failed to create wallet dir: {}", e))?;
+        .context("Failed to create wallet dir")?;
 
     // Clean up delta directory to ensure fresh reload
     // Delta layer contains temporary state from previous run that should be discarded
@@ -260,7 +279,7 @@ pub async fn reuse_test_wallet(
         .join("delta");
     if delta_dir.exists() {
         std::fs::remove_dir_all(&delta_dir)
-            .map_err(|e| format!("Failed to remove delta dir: {}", e))?;
+            .context("Failed to remove delta dir")?;
     }
 
     // Load or create persisted xprv
@@ -324,11 +343,11 @@ pub fn get_test_wallet_dir(wallet_name: &str) -> PathBuf {
 }
 
 /// Cleanup test wallet data
-pub async fn cleanup_test_wallet(wallet_name: &str) -> Result<(), String> {
+pub async fn cleanup_test_wallet(wallet_name: &str) -> Result<()> {
     let wallet_dir = get_test_wallet_dir(wallet_name);
     if wallet_dir.exists() {
         std::fs::remove_dir_all(&wallet_dir)
-            .map_err(|e| format!("Failed to cleanup wallet dir: {}", e))?;
+            .context("Failed to cleanup wallet dir")?;
     }
     Ok(())
 }

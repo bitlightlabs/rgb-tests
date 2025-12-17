@@ -4,6 +4,7 @@
 
 pub mod asset_params;
 pub mod chain;
+pub mod multisig;
 pub mod test_helpers;
 pub mod wallet;
 
@@ -39,6 +40,21 @@ pub use std::{
 pub use amplify::{s, ByteArray};
 pub use bp::{Outpoint, Sats, Txid};
 pub use bpstd::Network;
-pub use bpwallet::{indexers::esplora::Client as EsploraClient, Indexer as BpIndexer};
+pub use esplora::blocking::BlockingClient as EsploraClient;
 pub use once_cell::sync::Lazy;
 pub use time::OffsetDateTime;
+
+// Type conversion utilities for downstream usage
+// Due to Rust orphan rules, we can't implement From<bpstd::Network> for bitcoin::Network
+// So we provide a helper function instead
+
+/// Convert bpstd::Network to bitcoin::Network
+pub fn to_bitcoin_network(network: bpstd::Network) -> bitcoin::Network {
+    match network {
+        bpstd::Network::Mainnet => bitcoin::Network::Bitcoin,
+        bpstd::Network::Testnet3 => bitcoin::Network::Testnet,
+        bpstd::Network::Regtest => bitcoin::Network::Regtest,
+        bpstd::Network::Signet => bitcoin::Network::Signet,
+        _ => bitcoin::Network::Regtest,
+    }
+}

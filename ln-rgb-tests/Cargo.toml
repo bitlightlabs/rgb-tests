@@ -3,44 +3,64 @@ name = "ln-rgb-tests"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77.0"
-authors = ["Bincheng Paopao"]
+authors = ["will-bitlightlabs <jayabb@bitlightlabs.com>"]
 description = "Lightning Network RGB integration tests"
 
 [dependencies]
-# RGB foundation libraries (reusing rgb-tests submodules)
-bp-core = { path = "../bp-core" }
-rgb-runtime = { path = "../rgb", features = ["fs", "serde"] }
-rgb-std = { path = "../rgb-std", features = ["binfile"] }
-bp-wallet = { path = "../bp-wallet", features = ["electrum", "esplora", "fs"] }
-bp-std = { path = "../bp-std", features = ["signers"] }
-descriptors = { path = "../bp-std/descriptors" }
-psbt = { path = "../bp-std/psbt" }
-
-# RGB delta store (deprecated - switched to original StockpileDir)
-# rgb-delta-store = { path = "../rgb-delta-store" }
-
-# Lightning RGB wallet libraries
+# Lightning RGB wallet libraries (path reference)
 lightning-rgb-wallet = { path = "../../lightning-rgb-lib/lightning-rgb-wallet" }
 lightning-rgb-types = { path = "../../lightning-rgb-lib/lightning-rgb-types" }
 lightning-rgb-core = { path = "../../lightning-rgb-lib/lightning-rgb-core" }
+lightning-rgb-ln-types = { path = "../../lightning-rgb-lib/lightning-rgb-ln-types" }
 
 # Bitcoin
 bitcoin = "0.32"
 bitcoin_hashes = "0.14.0"
 
-# RGB related
-rgb-interfaces = { path = "../rgb-interfaces", features = ["serde"] }
-rgb-psbt = { path = "../rgb/psbt", features = ["bp"] }
-commit_verify = { path = "../client_side_validation/commit_verify" }
-single_use_seals = { path = "../client_side_validation/single_use_seals", features = ["strict_encoding"] }
-
-# Amplify
-amplify = { path = "../rust-amplify" }
-strict_encoding = { path = "../strict-encoding/rust", features = ["serde"] }
-strict_types = { path = "../strict-types" }
-
-# SONIC
-hypersonic = { path = "../sonic" }
+# RGB foundation libraries (aligned with lightning-rgb-lib crates.io versions)
+## bp-core
+bp-core = "0.12.0"
+## bp-electrum-client
+bp-electrum = "0.12.0-rc.1"
+## bp-esplora
+bp-esplora = { version = "0.12.0-rc.3", features = ["blocking"], default-features = false }
+## bp-std
+bp-std = { version = "0.12.0-rc.3", features = ["signers"] }
+descriptors = "0.12.0-rc.3"
+bp-invoice = "0.12.0-rc.3"
+psbt = "0.12.0-rc.3"
+## bp-wallet - REMOVED (lightning-rgb-lib uses RGB Owner architecture instead)
+# bp-wallet = { version = "0.12.0-rc.2", features = ["electrum", "esplora", "fs"] }
+## rgb-runtime
+rgb-runtime = { version = "0.12.0-rc.3", features = ["serde", "resolver-esplora"] }
+rgb-psbt = { version = "0.12.0-rc.3", features = ["bp"] }
+rgb-core = "0.12.0-rc.3"
+rgb-persist-fs = "0.12.0-rc.3"
+## rgb-std (using lightning-rgb-lib's private submodule)
+rgb-std = { path = "../../lightning-rgb-lib/deps/rgb-std-private" }
+## rgb-interfaces
+rgb-interfaces = { version = "0.12.0-rc.3", features = ["serde"] }
+## rust-amplify
+amplify = "4.9.0"
+## strict-encoding
+strict_encoding = { version = "2.9.1", features = ["serde"] }
+## strict-types
+strict_types = "2.9.0"
+## commit_verify
+commit_verify = "0.12.0"
+## sonic (using lightning-rgb-lib's private submodule)
+hypersonic = { path = "../../lightning-rgb-lib/deps/sonic-private" }
+sonic-persist-fs = { path = "../../lightning-rgb-lib/deps/sonic-private/persistence/fs" }
+sonic-api = { path = "../../lightning-rgb-lib/deps/sonic-private/api" }
+sonic-callreq = { path = "../../lightning-rgb-lib/deps/sonic-private/callreq", features = ["uri"] }
+## single_use_seals
+single_use_seals = { version = "0.12.0", features = ["strict_encoding"] }
+## AluVM
+aluvm = "0.12.0"
+zk-aluvm = "0.12.0"
+ultrasonic = "0.12.0"
+## Other
+baid64 = "0.4.2"
 
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }
@@ -53,6 +73,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rstest = "0.19.0"
 rstest_reuse = "0.6.0"
 serial_test = "3.2.0"
+anyhow = "1.0"
 
 # Utility libraries
 serde = { version = "1.0.215", features = ["derive"] }
@@ -67,61 +88,13 @@ hex = "0.4"
 
 
 [patch.crates-io]
-# patching all RGB-related deps, to measure code coverage
-## rust-amplify
-amplify = { path = "../rust-amplify" }
-## amplify-derive
-amplify_derive = { path = "../amplify-derive" }
-amplify_syn = { path = "../amplify-derive/syn" }
-## amplify-nonasync
-nonasync = { path = "../amplify-nonasync" }
-## amplify-num
-amplify_num = { path = "../amplify-num/num" }
-## baid64
-baid64 = { path = "../rust-baid64" }
-## bp-core
-bp-core = { path = "../bp-core" }
-bp-consensus = { path = "../bp-core/consensus" }
-bp-dbc = { path = "../bp-core/dbc" }
-bp-seals = { path = "../bp-core/seals" }
-## bp-electrum-client
-bp-electrum = { path = "../bp-electrum-client" }
-## bp-esplora-client
-bp-esplora = { path = "../bp-esplora-client" }
-## bp-std
-bp-derive = { path = "../bp-std/derive" }
-bp-std = { path = "../bp-std" }
-descriptors = { path = "../bp-std/descriptors" }
-bp-invoice = { path = "../bp-std/invoice" }
-psbt = { path = "../bp-std/psbt" }
-## bp-wallet
-bp-wallet = { path = "../bp-wallet" }
-## client_side_validation
-commit_verify = { path = "../client_side_validation/commit_verify" }
-commit_encoding_derive = { path = "../client_side_validation/commit_verify/derive" }
-single_use_seals = { path = "../client_side_validation/single_use_seals" }
-## rgb
-rgb-runtime = { path = "../rgb" }
-rgb-psbt = { path = "../rgb/psbt" }
-## rgb-core
-rgb-core = { path = "../rgb-core" }
-## rgb-std
-rgb-invoice = { path = "../rgb-std/invoice" }
-rgb-std = { path = "../rgb-std" }
-rgb-persist-fs = { path = "../rgb-std/persistence/fs" }
-## rgb-interfaces
-rgb-interfaces = { path = "../rgb-interfaces" }
-## rust-aluvm
-aluvm = { path = "../rust-aluvm" }
-zk-aluvm = { path = "../zk-aluvm" }
-## SONIC
-ultrasonic = { path = "../ultrasonic" }
-sonic-api = { path = "../sonic/api" }
-sonic-callreq = { path = "../sonic/callreq" }
-hypersonic = { path = "../sonic" }
-sonic-persist-fs = { path = "../sonic/persistence/fs" }
-## strict-encoding
-strict_encoding = { path = "../strict-encoding/rust" }
-strict_encoding_derive = { path = "../strict-encoding/rust/derive" }
-## strict-types
-strict_types = { path = "../strict-types" }
+# Align with lightning-rgb-lib patches (use same local submodules)
+rgb-std = { path = "../../lightning-rgb-lib/deps/rgb-std-private" }
+rgb-runtime = { path = "../../lightning-rgb-lib/deps/rgb-runtime-private", package = "rgb-runtime" }
+rgb-psbt = { path = "../../lightning-rgb-lib/deps/rgb-runtime-private/psbt", package = "rgb-psbt", features = ["bp"] }
+rgb-descriptors = { path = "../../lightning-rgb-lib/deps/rgb-runtime-private/descriptors", package = "rgb-descriptors" }
+hypersonic = { path = "../../lightning-rgb-lib/deps/sonic-private" }
+sonic-api = { path = "../../lightning-rgb-lib/deps/sonic-private/api" }
+sonic-callreq = { path = "../../lightning-rgb-lib/deps/sonic-private/callreq" }
+sonic-persist-fs = { path = "../../lightning-rgb-lib/deps/sonic-private/persistence/fs" }
+bp-esplora = { git = "https://github.com/will-bitlightlabs/bp-esplora-client.git", branch = "fix/utxo-vout-type" }

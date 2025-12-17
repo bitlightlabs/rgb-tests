@@ -1,7 +1,7 @@
 // Asset parameter builders for Lightning RGB tests
 
 use bp::Outpoint;
-use hypersonic::{CodexId, Consensus, IssuerSpec, NamedState, StateAtom};
+use hypersonic::{CodexId, Consensus, IssuerSpec, NamedState};
 use rgb::{Assignment, CreateParams, EitherSeal};
 use std::fs::File;
 use std::path::Path;

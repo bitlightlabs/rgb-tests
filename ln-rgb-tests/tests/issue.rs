@@ -49,8 +49,8 @@ async fn test_issue_nia_asset() {
     assert!(!utxos.is_empty(), "Wallet should have at least one UTXO");
 
     // Use the first UTXO as the allocation outpoint
-    let allocation_outpoint = utxos[0].outpoint;
-    println!("Using allocation outpoint: {}", allocation_outpoint);
+    let allocation_outpoint = utxos[0];
+    println!("Using allocation outpoint: {}:{}", allocation_outpoint.txid, allocation_outpoint.vout);
 
     // Create NIA issuance parameters
     let mut params = NIAIssueParams::new("TestToken", "TEST", "centiMilli", 1_000_000);
@@ -133,7 +133,7 @@ async fn test_issue_multiple_nia_assets() {
 
     for (i, (name, ticker, supply)) in assets.iter().enumerate() {
         let mut params = NIAIssueParams::new(*name, *ticker, "centiMilli", *supply);
-        params.add_allocation(utxos[i].outpoint, *supply);
+        params.add_allocation(utxos[i], *supply);
 
         println!(
             "Issuing asset {}: {} ({}) with supply {}",
@@ -202,14 +202,14 @@ async fn test_issue_nia_with_multiple_allocations() {
     let mut params = NIAIssueParams::new("MultiAllocToken", "MAT", "centiMilli", total_supply);
 
     // Split supply across 3 UTXOs
-    params.add_allocation(utxos[0].outpoint, 300_000);
-    params.add_allocation(utxos[1].outpoint, 300_000);
-    params.add_allocation(utxos[2].outpoint, 400_000);
+    params.add_allocation(utxos[0], 300_000);
+    params.add_allocation(utxos[1], 300_000);
+    params.add_allocation(utxos[2], 400_000);
 
     println!("Issuing asset with 3 allocations:");
-    println!("  UTXO 0: {} -> 300,000", utxos[0].outpoint);
-    println!("  UTXO 1: {} -> 300,000", utxos[1].outpoint);
-    println!("  UTXO 2: {} -> 400,000", utxos[2].outpoint);
+    println!("  UTXO 0: {}:{} -> 300,000", utxos[0].txid, utxos[0].vout);
+    println!("  UTXO 1: {}:{} -> 300,000", utxos[1].txid, utxos[1].vout);
+    println!("  UTXO 2: {}:{} -> 400,000", utxos[2].txid, utxos[2].vout);
 
     let contract_id = controller
         .issue(params.into_create_params())

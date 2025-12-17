@@ -1,5 +1,5 @@
 use super::*;
-use bpwallet::TxStatus;
+use esplora::api::TxStatus;
 use tokio::process::Command as TokioCommand;
 
 static INIT: Once = Once::new();
@@ -377,16 +377,20 @@ pub fn get_height_custom(instance: u8) -> u32 {
 }
 
 pub fn get_tx_height(txid: Txid, instance: u8) -> Option<u32> {
-    match tx_status(txid, instance) {
-        TxStatus::Mined(info) => Some(info.height.into()),
-        _ => None,
+    let status = tx_status(txid, instance);
+    if status.confirmed {
+        status.block_height
+    } else {
+        None
     }
 }
 
 // Only Esplora
 pub fn tx_status(txid: Txid, instance: u8) -> TxStatus {
-    let client = EsploraClient::new_esplora(&indexer_url(instance, Network::Regtest)).unwrap();
-    BpIndexer::status(&client, txid).unwrap()
+    let client = esplora::Builder::new(&indexer_url(instance, Network::Regtest))
+        .build_blocking()
+        .unwrap();
+    client.tx_status(&txid).unwrap()
 }
 
 // Only Esplora + Regtest for Lightning RGB tests
@@ -407,8 +411,8 @@ async fn _wait_indexer_sync_async(instance: u8) {
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let url = &indexer_url(instance, Network::Regtest);
-        let client = EsploraClient::new_esplora(url).unwrap();
-        if BpIndexer::block_hash(&client, blockcount).is_ok() {
+        let client = esplora::Builder::new(url).build_blocking().unwrap();
+        if client.block_hash(blockcount as u32).is_ok() {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 25.0 {
@@ -424,8 +428,8 @@ fn _wait_indexer_sync(instance: u8) {
     loop {
         std::thread::sleep(Duration::from_millis(100));
         let url = &indexer_url(instance, Network::Regtest);
-        let client = EsploraClient::new_esplora(url).unwrap();
-        if BpIndexer::block_hash(&client, blockcount).is_ok() {
+        let client = esplora::Builder::new(url).build_blocking().unwrap();
+        if client.block_hash(blockcount as u32).is_ok() {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 25.0 {
